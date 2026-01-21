@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Leaflet - TOC attributi + tematizzazione dinamica</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .layout { height: 100%; display: grid; grid-template-columns: 320px 1fr; }
+    #sidebar {
+      border-right: 1px solid #ddd;
+      padding: 12px;
+      overflow: auto;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: 14px;
+    }
+    #map { height: 100%; }
+
+    .title { font-weight: 700; margin: 0 0 8px 0; }
+    .hint { color: #555; font-size: 12px; margin: 0 0 12px 0; }
+    .search { width: 100%; padding: 8px; margin: 0 0 10px 0; box-sizing: border-box; }
+    .attr-list { list-style: none; padding: 0; margin: 0; }
+    .attr-list li { margin: 0; }
+    .attr-btn {
+      width: 100%;
+      text-align: left;
+      padding: 8px 10px;
+      border: 1px solid #e6e6e6;
+      background: #fff;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .attr-btn.active { border-color: #999; font-weight: 600; }
+    .block { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; }
+    .legend { font-size: 12px; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.15); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+    .status { font-size: 12px; color: #333; }
+    .warn { color: #8a2b2b; }
+  </style>
+</head>
+
+<body>
+  <div class="layout">
+    <aside id="sidebar">
+      <h3 class="title">TOC attributi</h3>
+      <p class="hint">Clicca un attributo per tematizzare. Lo styling è client-side (WFS/GeoJSON).</p>
+
+      <input id="search" class="search" placeholder="Filtra attributi..." />
+
+      <ul id="attrList" class="attr-list"></ul>
+
+      <div class="block">
+        <div class="status">
+          <div><b>Layer:</b> <span class="mono" id="layerName"></span></div>
+          <div><b>Modalità:</b> <span id="mode"></span></div>
+          <div><b>Feature caricate:</b> <span id="count"></span></div>
+          <div id="note" class="warn"></div>
+        </div>
+      </div>
+
+      <div class="block">
+        <h4 class="title" style="font-size:14px;">Legenda</h4>
+        <div id="legend" class="legend"></div>
+      </div>
+    </aside>
+
+    <div id="map"></div>
+  </div>
+
+  <script>
+    // --- Config ---
+    const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
+    const OWS_URL = "https://solve.corila.it/geoserver/geonode/ows"; // endpoint unico per WFS
+    const TYPE_NAME = "geonode:traiettoria";
+
+    // --- TOC: attributi da mostrare (in ordine) ---
+const TOC_ATTRS = [
+  "Conductivity",
+  "Depth",
+  "Oxygen percentage",
+  "Oxygen ppm",
+  "Ph",
+  "Pressure",
+  "Salinity",
+  "SOG",
+  "Temperature"
+];
+
+// --- Mappa label (TOC) -> nome campo reale nel GeoJSON ---
+// (se coincidono, lasciali uguali come sotto)
+const ATTR_FIELD_MAP = {
+  "Conductivity": "conductivity",
+  "Depth": "depth",
+  "Oxygen percentage": "oxygen_percentage",
+  "Oxygen ppm": "oxygen_ppm",
+  "Ph": "ph",
+  "Pressure": "pressure",
+  "Salinity": "salinity",
+  "SOG": "sog",
+  "Temperature": "temperature"
+};
+
+
+    // BBOX che mi hai dato (EPSG:4326)
+    const bbox = {
+      minx: 13.166609999999999,
+      miny: 45.726090000000006,
+      maxx: 13.229676666666668,
+      maxy: 45.73834
+    };
+
+    document.getElementById("layerName").textContent = TYPE_NAME;
+
+    // --- Mappa ---
+    const bounds = L.latLngBounds(
+      [bbox.miny, bbox.minx],
+      [bbox.maxy, bbox.maxx]
+    );
+
+    const map = L.map("map").fitBounds(bounds);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    // (opzionale) WMS sotto come "riferimento visivo" sempre uguale
+    const wmsRef = L.tileLayer.wms(WMS_URL, {
+      layers: TYPE_NAME,
+      styles: "",
+      format: "image/png",
+      transparent: true,
+      version: "1.1.0",
+      srs: "EPSG:4326"
+    }).addTo(map);
+
+    // --- WFS load (GeoJSON) ---
+    async function fetchWFSForBounds(b) {
+      const bboxStr = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
+
+      const url = new URL(OWS_URL);
+      url.searchParams.set("service", "WFS");
+      url.searchParams.set("version", "2.0.0");
+      url.searchParams.set("request", "GetFeature");
+      url.searchParams.set("typeNames", TYPE_NAME);
+      url.searchParams.set("outputFormat", "application/json");
+      url.searchParams.set("srsName", "EPSG:4326");
+      url.searchParams.set("bbox", bboxStr + ",EPSG:4326");
+      // url.searchParams.set("count", "5000"); // se serve limit
+
+      const res = await fetch(url.toString());
+      if (!res.ok) throw new Error(`WFS error ${res.status}: ${res.statusText}`);
+      return await res.json();
+    }
+
+    let geojsonData = null;
+    let vectorLayer = null;
+    let currentAttr = null;
+
+    // --- Utils: rileva tipo attributo ---
+    function pickNonNull(values) {
+      return values.filter(v => v !== null && v !== undefined && v !== "");
+    }
+
+    function isNumericAttr(values) {
+      const v = pickNonNull(values);
+      if (v.length === 0) return false;
+      // numerico se la maggioranza è convertibile a numero finito
+      let ok = 0;
+      for (const x of v.slice(0, 2000)) {
+        const n = (typeof x === "number") ? x : Number(String(x).replace(",", "."));
+        if (Number.isFinite(n)) ok++;
+      }
+      return ok / Math.min(v.length, 2000) >= 0.8;
+    }
+
+    // --- Classificazione numerica (quantili) ---
+    function quantile(sorted, q) {
+      const pos = (sorted.length - 1) * q;
+      const base = Math.floor(pos);
+      const rest = pos - base;
+      if (sorted[base + 1] === undefined) return sorted[base];
+      return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+    }
+
+    function makeQuantileBreaks(nums, k = 5) {
+      const s = [...nums].sort((a,b)=>a-b);
+      const breaks = [];
+      for (let i=1; i<k; i++) breaks.push(quantile(s, i/k));
+      return breaks; // array di soglie crescenti
+    }
+
+    // --- Palette colori "semplice" ---
+    // (non è un chart matplotlib: qui va benissimo definire una palette)
+    const CAT_COLORS = [
+      "#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd",
+      "#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf"
+    ];
+
+    // --- Style per linee/punti/poligoni ---
+    function geometryKind(feature) {
+      const t = feature.geometry?.type || "";
+      if (t.includes("Line")) return "line";
+      if (t.includes("Point")) return "point";
+      if (t.includes("Polygon")) return "poly";
+      return "other";
+    }
+
+    function styleFeatureFactory(theming) {
+      // theming: { mode: 'numeric'|'categorical'|'none', getColor: fn, attr: string, breaks?, categories? }
+      return function(feature) {
+        const kind = geometryKind(feature);
+        const base = { weight: 3, opacity: 1 };
+        const value = theming?.attr ? feature.properties?.[theming.attr] : null;
+        const color = theming?.getColor ? theming.getColor(value) : "#3388ff";
+
+        if (kind === "line") {
+          return { ...base, color };
+        }
+        if (kind === "poly") {
+          return { ...base, color, fillColor: color, fillOpacity: 0.35 };
+        }
+        return { ...base, color };
+      }
+    }
+
+    function pointToLayerFactory(theming) {
+      return function(feature, latlng) {
+        const value = theming?.attr ? feature.properties?.[theming.attr] : null;
+        const color = theming?.getColor ? theming.getColor(value) : "#3388ff";
+        return L.circleMarker(latlng, { radius: 6, weight: 2, color, fillColor: color, fillOpacity: 0.7 });
+      }
+    }
+
+    // --- Legenda ---
+    function setLegendNumeric(attr, breaks) {
+      const el = document.getElementById("legend");
+      el.innerHTML = "";
+
+      const steps = breaks.length + 1;
+      for (let i = 0; i < steps; i++) {
+        const row = document.createElement("div");
+        row.className = "legend-row";
+        const sw = document.createElement("div");
+        sw.className = "swatch";
+        sw.style.background = numericColor(i, steps);
+
+        const label = document.createElement("div");
+        label.className = "mono";
+        if (i === 0) label.textContent = `<= ${breaks[0].toFixed(3)}`;
+        else if (i === steps - 1) label.textContent = `> ${breaks[breaks.length-1].toFixed(3)}`;
+        else label.textContent = `${breaks[i-1].toFixed(3)} – ${breaks[i].toFixed(3)}`;
+
+        row.appendChild(sw);
+        row.appendChild(label);
+        el.appendChild(row);
+      }
+    }
+
+    function setLegendCategorical(attr, categoriesMap) {
+      const el = document.getElementById("legend");
+      el.innerHTML = "";
+
+      // ordina per frequenza decrescente, poi nome
+      const entries = [...categoriesMap.entries()]
+        .sort((a,b) => b[1].count - a[1].count || String(a[0]).localeCompare(String(b[0])));
+
+      // mostra max 30 voci per non esplodere la sidebar
+      const limited = entries.slice(0, 30);
+
+      for (const [cat, meta] of limited) {
+        const row = document.createElement("div");
+        row.className = "legend-row";
+
+        const sw = document.createElement("div");
+        sw.className = "swatch";
+        sw.style.background = meta.color;
+
+        const label = document.createElement("div");
+        label.className = "mono";
+        label.textContent = `${String(cat)} (${meta.count})`;
+
+        row.appendChild(sw);
+        row.appendChild(label);
+        el.appendChild(row);
+      }
+
+      if (entries.length > limited.length) {
+        const more = document.createElement("div");
+        more.className = "hint";
+        more.textContent = `+ ${entries.length - limited.length} categorie non mostrate (troppo numerose)`;
+        el.appendChild(more);
+      }
+    }
+
+    function setLegendNone() {
+      document.getElementById("legend").innerHTML = `<div class="hint">Seleziona un attributo per vedere la legenda.</div>`;
+    }
+
+    // --- Colore numerico: gradiente semplice (da chiaro a scuro) ---
+    function numericColor(idx, steps) {
+      // gradiente blu-ish (semplice)
+      const t = steps <= 1 ? 0 : idx / (steps - 1);
+      const a = [230, 242, 255]; // chiaro
+      const b = [8, 48, 107];    // scuro
+      const c = a.map((av,i)=>Math.round(av + (b[i]-av)*t));
+      return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+
+    // --- Build TOC attributi ---
+    function buildAttributeList(features) {
+      const keys = new Set();
+      for (const f of features) {
+        const props = f.properties || {};
+        Object.keys(props).forEach(k => keys.add(k));
+      }
+      // metti in ordine alfabetico
+      return [...keys].sort((a,b)=>a.localeCompare(b));
+    }
+
+    function renderTOC(attrs) {
+  const ul = document.getElementById("attrList");
+  ul.innerHTML = "";
+
+  for (const label of attrs) {
+    const fieldName = ATTR_FIELD_MAP[label] || label;
+
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.className = "attr-btn";
+    btn.textContent = label; // ciò che vedi in TOC
+    btn.onclick = () => selectAttribute(fieldName, label); // usa fieldName per tematizzare
+    li.appendChild(btn);
+    ul.appendChild(li);
+    }
+    }
+
+
+    function setActiveButton(attr) {
+      document.querySelectorAll(".attr-btn").forEach(b => {
+        b.classList.toggle("active", b.textContent === attr);
+      });
+    }
+
+    // --- Selezione attributo e tematizzazione ---
+    function selectAttribute(fieldName, labelForUI = fieldName) {
+  if (!geojsonData) return;
+
+  currentAttr = fieldName;
+  setActiveButton(labelForUI);
+
+  const features = geojsonData.features || [];
+  const values = features.map(f => f.properties?.[fieldName]);
+
+  const note = document.getElementById("note");
+  note.textContent = "";
+
+
+      // decidi numerico vs categorico
+      if (isNumericAttr(values)) {
+        const nums = pickNonNull(values).map(v => {
+          const n = (typeof v === "number") ? v : Number(String(v).replace(",", "."));
+          return n;
+        }).filter(n => Number.isFinite(n));
+
+        if (nums.length < 5) {
+          note.textContent = "Attributo numerico ma con pochi valori validi.";
+        }
+
+        const breaks = makeQuantileBreaks(nums, 5);
+        const steps = breaks.length + 1;
+
+        function getClassIndex(n) {
+          let idx = 0;
+          while (idx < breaks.length && n > breaks[idx]) idx++;
+          return idx; // 0..breaks.length
+        }
+
+
+        const theming = {
+  mode: "numeric",
+  attr: fieldName,
+  breaks,
+  getColor: (v) => {
+    const n = (typeof v === "number") ? v : Number(String(v).replace(",", "."));
+    if (!Number.isFinite(n)) return "#bbbbbb";
+    const ci = getClassIndex(n);
+    return numericColor(ci, steps);
+  }
+};
+
+
+    document.getElementById("mode").textContent = "Numerico (quantili)";
+    applyVectorLayer(theming);
+    setLegendNumeric(labelForUI, breaks);
+    return;
+
+      }
+
+      
+
+      // categorico
+      const cleaned = pickNonNull(values).map(v => String(v));
+      const freq = new Map();
+      for (const v of cleaned) freq.set(v, (freq.get(v) || 0) + 1);
+
+      // se troppe categorie, avviso
+      if (freq.size > 50) {
+        note.textContent = `Attributo categorico con molte categorie (${freq.size}). Legenda limitata e colori riutilizzati.`;
+      }
+
+      // assegna colori alle categorie (ordinando per frequenza)
+      const sortedCats = [...freq.entries()].sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
+      const categoriesMap = new Map();
+      sortedCats.forEach((cat, i) => {
+        categoriesMap.set(cat, { color: CAT_COLORS[i % CAT_COLORS.length], count: freq.get(cat) });
+      });
+
+      const theming = {
+        mode: "categorical",
+        attr,
+        categoriesMap,
+        getColor: (v) => {
+          const key = (v === null || v === undefined || v === "") ? null : String(v);
+          if (key === null) return "#bbbbbb";
+          return categoriesMap.get(key)?.color || "#bbbbbb";
+        }
+      };
+
+      document.getElementById("mode").textContent = "Categorico";
+      applyVectorLayer(theming);
+      setLegendCategorical(attr, categoriesMap);
+    }
+
+    function applyVectorLayer(theming) {
+      if (vectorLayer) map.removeLayer(vectorLayer);
+
+      vectorLayer = L.geoJSON(geojsonData, {
+        style: styleFeatureFactory(theming),
+        pointToLayer: pointToLayerFactory(theming),
+        onEachFeature: (feature, layer) => {
+          // popup: evidenzia attributo selezionato + il resto sotto
+          const props = feature.properties || {};
+          const rows = [];
+          if (theming?.attr) {
+            rows.push(`<div><b>${theming.attr}</b>: ${props[theming.attr] ?? ""}</div>`);
+            rows.push(`<hr style="border:none;border-top:1px solid #eee;margin:8px 0;">`);
+          }
+          for (const [k,v] of Object.entries(props)) {
+            rows.push(`<div><span class="mono">${k}</span>: ${v ?? ""}</div>`);
+          }
+          layer.bindPopup(rows.join(""));
+        }
+      }).addTo(map);
+    }
+
+    // --- Filter TOC ---
+    document.getElementById("search").addEventListener("input", (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      document.querySelectorAll("#attrList .attr-btn").forEach(btn => {
+        const ok = btn.textContent.toLowerCase().includes(q);
+        btn.parentElement.style.display = ok ? "" : "none";
+      });
+    });
+
+    // --- Caricamento iniziale ---
+    async function init() {
+      try {
+        geojsonData = await fetchWFSForBounds(bounds);
+
+        const features = geojsonData.features || [];
+        document.getElementById("count").textContent = String(features.length);
+
+        const attrs = buildAttributeList(features);
+        renderTOC(TOC_ATTRS);
+        setLegendNone();
+
+       
+
+
+        // opzionale: pre-seleziona il primo attributo
+        // if (attrs.length) selectAttribute(attrs[0]);
+
+      } catch (err) {
+        document.getElementById("note").textContent =
+          "Errore nel caricamento WFS (possibile CORS o WFS non abilitato). Controlla console.";
+        console.error(err);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
