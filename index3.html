@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>GeoNode WMS – AGNES + Del Toro 2</title>
+  <title>GeoNode WMS – Turbine AGNES + Del Toro 2</title>
 
   <link
     rel="stylesheet"
@@ -14,29 +14,35 @@
   <style>
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; }
-    .panel {
-      position: absolute;
-      z-index: 1000;
-      top: 12px;
-      left: 12px;
-      background: rgba(255,255,255,0.95);
-      padding: 10px 12px;
-      border-radius: 10px;
-      box-shadow: 0 4px 18px rgba(0,0,0,0.15);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      max-width: 360px;
+    .panel{
+      position:absolute; z-index:1000; top:12px; left:12px;
+      background:rgba(255,255,255,.95);
+      padding:10px 12px; border-radius:10px;
+      box-shadow:0 4px 18px rgba(0,0,0,.15);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      max-width:420px;
     }
-    .panel h1 { font-size: 14px; margin: 0 0 6px 0; }
-    .hint { font-size: 12px; opacity: 0.8; }
+    .panel h1{ font-size:14px; margin:0 0 6px 0; }
+    .hint{ font-size:12px; opacity:.8; }
+    .btnrow { margin-top: 8px; display:flex; gap:8px; }
+    button{
+      padding:8px 10px; border-radius:8px; border:1px solid #ddd; background:#fff;
+      font-size:13px; cursor:pointer;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
   <div class="panel">
-    <h1>AGNES + Del Toro 2 (WMS)</h1>
+    <h1>Turbine (WMS) – AGNES + Del Toro 2</h1>
     <div class="hint">
-      Base: Esri World Imagery. Clicca sulla mappa per interrogare (GetFeatureInfo).
+      Base: Esri World Imagery. Clic sulla mappa per interrogare (GetFeatureInfo).
+      <br/>Usa “Zoom layer” per adattare la vista alle estensioni pubblicate.
+    </div>
+    <div class="btnrow">
+      <button id="zoomBtn">Zoom layer</button>
+      <button id="homeBtn">Home</button>
     </div>
   </div>
 
@@ -49,13 +55,15 @@
   <script>
     const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
 
-    const LAYER_DEL_TORO = "geonode:del_toro_2_def";
-    const LAYER_AGNES = "geonode:agnes_romagna_1_2_def";
+    // Layer turbine
+    const LAYER_DEL_TORO_WTG = "geonode:del_toro2_wtg_points_wgs";
+    const LAYER_AGNES_WTG    = "geonode:agnes_romagna_1_2_turbine_def";
 
     // --- Map ---
     const map = L.map("map").setView([43.8, 12.5], 6);
+    const HOME_VIEW = { center: [43.8, 12.5], zoom: 6 };
 
-    // Satellite basemap (no key)
+    // Basemap
     const esriSat = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       { maxZoom: 20, attribution: "Tiles &copy; Esri" }
@@ -66,16 +74,16 @@
       { maxZoom: 20, attribution: "&copy; OpenStreetMap" }
     );
 
-    // --- WMS overlays (WMS 1.1.1) ---
-    const delToro = L.tileLayer.wms(WMS_URL, {
-      layers: LAYER_DEL_TORO,
+    // WMS overlays
+    const delToroWTG = L.tileLayer.wms(WMS_URL, {
+      layers: LAYER_DEL_TORO_WTG,
       format: "image/png",
       transparent: true,
       version: "1.1.1"
     }).addTo(map);
 
-    const agnes = L.tileLayer.wms(WMS_URL, {
-      layers: LAYER_AGNES,
+    const agnesWTG = L.tileLayer.wms(WMS_URL, {
+      layers: LAYER_AGNES_WTG,
       format: "image/png",
       transparent: true,
       version: "1.1.1"
@@ -84,21 +92,102 @@
     // Layer control
     L.control.layers(
       { "Satellite (Esri)": esriSat, "OpenStreetMap": osm },
-      { "Del Toro 2": delToro, "AGNES Romagna 1&2": agnes },
+      { "Del Toro 2 – turbine": delToroWTG, "AGNES – turbine": agnesWTG },
       { collapsed: false }
     ).addTo(map);
 
-    // --- GetFeatureInfo on click (basic) ---
-    function getFeatureInfoUrl(latlng, layerName) {
+    // ---------------------------
+    // 1) Zoom automatico su layer (GetCapabilities)
+    // ---------------------------
+    async function fetchCapabilitiesXML() {
+      const url = `${WMS_URL}?service=WMS&request=GetCapabilities&version=1.1.1`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`GetCapabilities fallita: ${res.status}`);
+      const txt = await res.text();
+      return new DOMParser().parseFromString(txt, "text/xml");
+    }
+
+    function getLayerBBoxWGS84(xml, layerName) {
+      // Cerca un Layer che abbia Name=layerName
+      const layers = Array.from(xml.getElementsByTagName("Layer"));
+      for (const L of layers) {
+        const nameEl = L.getElementsByTagName("Name")[0];
+        if (!nameEl) continue;
+        const name = (nameEl.textContent || "").trim();
+        if (name !== layerName) continue;
+
+        // 1.1.1 spesso ha LatLonBoundingBox
+        const ll = L.getElementsByTagName("LatLonBoundingBox")[0];
+        if (ll) {
+          const minx = parseFloat(ll.getAttribute("minx"));
+          const miny = parseFloat(ll.getAttribute("miny"));
+          const maxx = parseFloat(ll.getAttribute("maxx"));
+          const maxy = parseFloat(ll.getAttribute("maxy"));
+          if ([minx,miny,maxx,maxy].every(Number.isFinite)) {
+            // minx/miny/maxx/maxy sono lon/lat
+            return L.latLngBounds([miny, minx], [maxy, maxx]);
+          }
+        }
+
+        // fallback: BoundingBox con SRS=EPSG:4326
+        const bbs = Array.from(L.getElementsByTagName("BoundingBox"));
+        for (const bb of bbs) {
+          const srs = bb.getAttribute("SRS") || "";
+          if (!srs.includes("4326")) continue;
+          const minx = parseFloat(bb.getAttribute("minx"));
+          const miny = parseFloat(bb.getAttribute("miny"));
+          const maxx = parseFloat(bb.getAttribute("maxx"));
+          const maxy = parseFloat(bb.getAttribute("maxy"));
+          if ([minx,miny,maxx,maxy].every(Number.isFinite)) {
+            return L.latLngBounds([miny, minx], [maxy, maxx]);
+          }
+        }
+      }
+      return null;
+    }
+
+    async function zoomToActiveLayers() {
+      const xml = await fetchCapabilitiesXML();
+      const boundsList = [];
+
+      if (map.hasLayer(delToroWTG)) {
+        const b = getLayerBBoxWGS84(xml, LAYER_DEL_TORO_WTG);
+        if (b) boundsList.push(b);
+      }
+      if (map.hasLayer(agnesWTG)) {
+        const b = getLayerBBoxWGS84(xml, LAYER_AGNES_WTG);
+        if (b) boundsList.push(b);
+      }
+
+      if (!boundsList.length) return;
+
+      let union = boundsList[0];
+      for (let i = 1; i < boundsList.length; i++) union = union.extend(boundsList[i]);
+      map.fitBounds(union.pad(0.10));
+    }
+
+    document.getElementById("zoomBtn").addEventListener("click", () => {
+      zoomToActiveLayers().catch(err => {
+        console.error(err);
+        alert("Impossibile leggere GetCapabilities per calcolare l'estensione dei layer.");
+      });
+    });
+
+    document.getElementById("homeBtn").addEventListener("click", () => {
+      map.setView(HOME_VIEW.center, HOME_VIEW.zoom);
+    });
+
+    // ---------------------------
+    // 2) GetFeatureInfo (JSON + fallback HTML)
+    // ---------------------------
+    function buildGFIUrl(latlng, layerName, infoFormat) {
       const point = map.latLngToContainerPoint(latlng, map.getZoom());
       const size = map.getSize();
 
-      // WMS 1.1.1 uses SRS, x/y, bbox in EPSG:4326 or EPSG:3857.
-      // Leaflet map is in EPSG:3857 by default, so we query in EPSG:3857.
+      // Query in EPSG:3857 (Leaflet default)
       const bounds = map.getBounds();
       const sw = map.options.crs.project(bounds.getSouthWest());
       const ne = map.options.crs.project(bounds.getNorthEast());
-
       const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
 
       const params = {
@@ -113,7 +202,7 @@
         height: size.y,
         width: size.x,
         format: "image/png",
-        info_format: "application/json",
+        info_format: infoFormat,
         srs: "EPSG:3857",
         x: Math.round(point.x),
         y: Math.round(point.y)
@@ -126,41 +215,47 @@
       return `${WMS_URL}?${query}`;
     }
 
-    async function fetchFeatureInfo(latlng) {
-      // Provo entrambi i layer e concatena i risultati
-      const urls = [
-        getFeatureInfoUrl(latlng, LAYER_DEL_TORO),
-        getFeatureInfoUrl(latlng, LAYER_AGNES)
-      ];
-
-      const results = [];
-      for (const url of urls) {
-        try {
-          const r = await fetch(url);
-          if (!r.ok) continue;
+    async function fetchGFI(latlng, layerName) {
+      // 1) prova JSON
+      const urlJson = buildGFIUrl(latlng, layerName, "application/json");
+      try {
+        const r = await fetch(urlJson);
+        if (r.ok) {
           const data = await r.json();
           if (data && data.features && data.features.length) {
-            results.push({ url, data });
+            return { type: "json", data };
           }
-        } catch (e) {
-          // ignore
         }
-      }
-      return results;
+      } catch (e) { /* ignore */ }
+
+      // 2) fallback HTML
+      const urlHtml = buildGFIUrl(latlng, layerName, "text/html");
+      try {
+        const r = await fetch(urlHtml);
+        if (r.ok) {
+          const html = await r.text();
+          // GeoServer spesso ritorna HTML anche se non ci sono feature, quindi controllo minimo:
+          if (html && html.trim().length > 0 && !html.includes("no features were found")) {
+            return { type: "html", data: html };
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      return null;
     }
 
-    function formatGeoJsonFeatures(title, gj) {
+    function formatGeoJson(title, gj) {
       const feats = gj.features || [];
       let html = `<b>${title}</b><br/>`;
-      feats.slice(0, 5).forEach((f, idx) => {
+      feats.slice(0, 5).forEach((f, i) => {
         html += `<hr style="border:none;border-top:1px solid #ddd;margin:6px 0;" />`;
-        html += `<div style="font-size:12px;"><b>Feature ${idx+1}</b><br/>`;
+        html += `<div style="font-size:12px;"><b>Feature ${i+1}</b><br/>`;
         const props = f.properties || {};
         const keys = Object.keys(props);
         if (!keys.length) {
           html += `(nessun attributo)<br/>`;
         } else {
-          keys.slice(0, 20).forEach(k => {
+          keys.slice(0, 24).forEach(k => {
             html += `<span style="opacity:.8">${k}</span>: ${props[k]}<br/>`;
           });
         }
@@ -170,32 +265,41 @@
     }
 
     map.on("click", async (e) => {
-      // Se entrambi i layer sono spenti, non fare niente
-      const anyOn = map.hasLayer(delToro) || map.hasLayer(agnes);
-      if (!anyOn) return;
+      const active = [];
+      if (map.hasLayer(delToroWTG)) active.push({name:"Del Toro 2 – turbine", layer:LAYER_DEL_TORO_WTG});
+      if (map.hasLayer(agnesWTG))   active.push({name:"AGNES – turbine",     layer:LAYER_AGNES_WTG});
 
-      const out = await fetchFeatureInfo(e.latlng);
-      if (!out.length) {
+      if (!active.length) return;
+
+      const blocks = [];
+      for (const a of active) {
+        const res = await fetchGFI(e.latlng, a.layer);
+        if (!res) continue;
+
+        if (res.type === "json") {
+          blocks.push(formatGeoJson(a.name, res.data));
+        } else {
+          // HTML: lo inserisco in iframe-like container per non rompere lo stile
+          blocks.push(`<b>${a.name}</b><br/><div style="font-size:12px;max-height:220px;overflow:auto;border:1px solid #ddd;border-radius:8px;padding:6px;">${res.data}</div>`);
+        }
+      }
+
+      if (!blocks.length) {
         L.popup()
           .setLatLng(e.latlng)
-          .setContent("<b>Nessun elemento interrogabile qui</b><br/><span style='font-size:12px;opacity:.8'>Se ti aspettavi risultati, verifica che il layer sia Queryable e che CORS/JSON siano abilitati.</span>")
+          .setContent("<b>Nessun elemento interrogabile qui</b><br/><span style='font-size:12px;opacity:.8'>Se ti aspettavi risultati, verifica che il layer sia Queryable e che CORS sia abilitato.</span>")
           .openOn(map);
         return;
       }
 
-      let html = "";
-      for (const item of out) {
-        const isDelToro = item.url.includes(encodeURIComponent(LAYER_DEL_TORO));
-        const title = isDelToro ? "Del Toro 2" : "AGNES Romagna 1&2";
-        html += formatGeoJsonFeatures(title, item.data);
-        html += "<br/>";
-      }
-
-      L.popup({ maxWidth: 420 })
+      L.popup({ maxWidth: 520 })
         .setLatLng(e.latlng)
-        .setContent(html)
+        .setContent(blocks.join("<br/>"))
         .openOn(map);
     });
+
+    // opzionale: al primo avvio fai zoom sugli extent
+    // zoomToActiveLayers().catch(() => {});
   </script>
 </body>
 </html>
