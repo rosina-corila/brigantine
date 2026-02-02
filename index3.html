@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GeoNode WMS – AGNES + Del Toro 2</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; }
+    .panel {
+      position: absolute;
+      z-index: 1000;
+      top: 12px;
+      left: 12px;
+      background: rgba(255,255,255,0.95);
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      max-width: 360px;
+    }
+    .panel h1 { font-size: 14px; margin: 0 0 6px 0; }
+    .hint { font-size: 12px; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="panel">
+    <h1>AGNES + Del Toro 2 (WMS)</h1>
+    <div class="hint">
+      Base: Esri World Imagery. Clicca sulla mappa per interrogare (GetFeatureInfo).
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
+
+    const LAYER_DEL_TORO = "geonode:del_toro_2_def";
+    const LAYER_AGNES = "geonode:agnes_romagna_1_2_def";
+
+    // --- Map ---
+    const map = L.map("map").setView([43.8, 12.5], 6);
+
+    // Satellite basemap (no key)
+    const esriSat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, attribution: "Tiles &copy; Esri" }
+    ).addTo(map);
+
+    const osm = L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 20, attribution: "&copy; OpenStreetMap" }
+    );
+
+    // --- WMS overlays (WMS 1.1.1) ---
+    const delToro = L.tileLayer.wms(WMS_URL, {
+      layers: LAYER_DEL_TORO,
+      format: "image/png",
+      transparent: true,
+      version: "1.1.1"
+    }).addTo(map);
+
+    const agnes = L.tileLayer.wms(WMS_URL, {
+      layers: LAYER_AGNES,
+      format: "image/png",
+      transparent: true,
+      version: "1.1.1"
+    }).addTo(map);
+
+    // Layer control
+    L.control.layers(
+      { "Satellite (Esri)": esriSat, "OpenStreetMap": osm },
+      { "Del Toro 2": delToro, "AGNES Romagna 1&2": agnes },
+      { collapsed: false }
+    ).addTo(map);
+
+    // --- GetFeatureInfo on click (basic) ---
+    function getFeatureInfoUrl(latlng, layerName) {
+      const point = map.latLngToContainerPoint(latlng, map.getZoom());
+      const size = map.getSize();
+
+      // WMS 1.1.1 uses SRS, x/y, bbox in EPSG:4326 or EPSG:3857.
+      // Leaflet map is in EPSG:3857 by default, so we query in EPSG:3857.
+      const bounds = map.getBounds();
+      const sw = map.options.crs.project(bounds.getSouthWest());
+      const ne = map.options.crs.project(bounds.getNorthEast());
+
+      const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
+
+      const params = {
+        service: "WMS",
+        version: "1.1.1",
+        request: "GetFeatureInfo",
+        layers: layerName,
+        query_layers: layerName,
+        styles: "",
+        bbox: bbox,
+        feature_count: 10,
+        height: size.y,
+        width: size.x,
+        format: "image/png",
+        info_format: "application/json",
+        srs: "EPSG:3857",
+        x: Math.round(point.x),
+        y: Math.round(point.y)
+      };
+
+      const query = Object.keys(params)
+        .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
+        .join("&");
+
+      return `${WMS_URL}?${query}`;
+    }
+
+    async function fetchFeatureInfo(latlng) {
+      // Provo entrambi i layer e concatena i risultati
+      const urls = [
+        getFeatureInfoUrl(latlng, LAYER_DEL_TORO),
+        getFeatureInfoUrl(latlng, LAYER_AGNES)
+      ];
+
+      const results = [];
+      for (const url of urls) {
+        try {
+          const r = await fetch(url);
+          if (!r.ok) continue;
+          const data = await r.json();
+          if (data && data.features && data.features.length) {
+            results.push({ url, data });
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      return results;
+    }
+
+    function formatGeoJsonFeatures(title, gj) {
+      const feats = gj.features || [];
+      let html = `<b>${title}</b><br/>`;
+      feats.slice(0, 5).forEach((f, idx) => {
+        html += `<hr style="border:none;border-top:1px solid #ddd;margin:6px 0;" />`;
+        html += `<div style="font-size:12px;"><b>Feature ${idx+1}</b><br/>`;
+        const props = f.properties || {};
+        const keys = Object.keys(props);
+        if (!keys.length) {
+          html += `(nessun attributo)<br/>`;
+        } else {
+          keys.slice(0, 20).forEach(k => {
+            html += `<span style="opacity:.8">${k}</span>: ${props[k]}<br/>`;
+          });
+        }
+        html += `</div>`;
+      });
+      return html;
+    }
+
+    map.on("click", async (e) => {
+      // Se entrambi i layer sono spenti, non fare niente
+      const anyOn = map.hasLayer(delToro) || map.hasLayer(agnes);
+      if (!anyOn) return;
+
+      const out = await fetchFeatureInfo(e.latlng);
+      if (!out.length) {
+        L.popup()
+          .setLatLng(e.latlng)
+          .setContent("<b>Nessun elemento interrogabile qui</b><br/><span style='font-size:12px;opacity:.8'>Se ti aspettavi risultati, verifica che il layer sia Queryable e che CORS/JSON siano abilitati.</span>")
+          .openOn(map);
+        return;
+      }
+
+      let html = "";
+      for (const item of out) {
+        const isDelToro = item.url.includes(encodeURIComponent(LAYER_DEL_TORO));
+        const title = isDelToro ? "Del Toro 2" : "AGNES Romagna 1&2";
+        html += formatGeoJsonFeatures(title, item.data);
+        html += "<br/>";
+      }
+
+      L.popup({ maxWidth: 420 })
+        .setLatLng(e.latlng)
+        .setContent(html)
+        .openOn(map);
+    });
+  </script>
+</body>
+</html>
