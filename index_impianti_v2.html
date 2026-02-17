@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GeoNode WMS – Impianti</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; }
+
+    /* Left panel */
+    .legend {
+      position: absolute;
+      z-index: 1000;
+      top: 12px;
+      left: 12px;
+      background: rgba(255,255,255,0.96);
+      padding: 10px 12px;
+      border-radius: 12px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.16);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 320px;
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .legend h1 { font-size: 14px; margin: 0 0 8px 0; }
+    .proj { margin: 10px 0; }
+    .proj-title {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 650; margin-bottom: 6px;
+    }
+    .items { margin-left: 6px; }
+    .item { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+    .item small { opacity: .75; }
+    .hint { font-size: 12px; opacity: .8; margin-top: 8px; line-height: 1.25; }
+
+    /* Popup card styles (inspired by your screenshot) */
+    .wf-card {
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 360px;
+      max-width: 90vw;
+    }
+    .wf-header {
+      position: relative;
+      padding: 14px 14px 10px 14px;
+      background: #f5f6fb;
+      border-radius: 14px 14px 0 0;
+      border: 1px solid rgba(0,0,0,.08);
+      border-bottom: none;
+    }
+    .wf-title {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: .2px;
+      color: #0b1b3a;
+      line-height: 1.15;
+      margin: 0;
+      padding-right: 44px;
+    }
+    .wf-icon {
+      width: 22px; height: 22px; margin-top: 2px; flex: 0 0 auto;
+    }
+    .wf-close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 34px; height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: rgba(255,255,255,.85);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .wf-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 10px 14px 14px 14px;
+      background: #f5f6fb;
+      border-left: 1px solid rgba(0,0,0,.08);
+      border-right: 1px solid rgba(0,0,0,.08);
+      border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+    .wf-metric {
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(255,255,255,.8);
+      border: 1px solid rgba(0,0,0,.08);
+      min-height: 52px;
+    }
+    .wf-metric .k {
+      font-size: 11px;
+      color: rgba(11,27,58,.7);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      font-weight: 650;
+      text-transform: none;
+    }
+    .wf-metric .v {
+      font-size: 13px;
+      font-weight: 750;
+      color: #0b1b3a;
+      word-break: break-word;
+    }
+    .wf-body {
+      border: 1px solid rgba(0,0,0,.08);
+      border-top: none;
+      border-radius: 0 0 14px 14px;
+      background: #ffffff;
+      padding: 12px 14px 14px 14px;
+      max-height: 320px;
+      overflow: auto;
+    }
+    .wf-section {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(0,0,0,.08);
+    }
+    .wf-section:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    .wf-h2 {
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      font-weight: 850;
+      color: #0b1b3a;
+    }
+    .wf-kv {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .wf-row {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .wf-row .k {
+      color: rgba(11,27,58,.65);
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .wf-row .v {
+      color: #0b1b3a;
+      font-weight: 650;
+      word-break: break-word;
+    }
+
+    .wf-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .wf-nav .pill {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: #0b1b3a;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .wf-nav button {
+      width: 34px; height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: #0b1b3a;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+    .wf-note {
+      font-size: 12px;
+      color: rgba(11,27,58,.65);
+      margin-top: 8px;
+      line-height: 1.2;
+    }
+
+    /* Leaflet popup tweaks */
+    .leaflet-popup-content { margin: 10px 10px; }
+    .leaflet-popup-content-wrapper { border-radius: 16px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="legend">
+    <h1>Impianti (WMS)</h1>
+
+    <div class="proj">
+      <div class="proj-title">
+        <span>Impianti</span>
+      </div>
+      <div class="items">
+        <label class="item">
+          <input type="checkbox" id="chk_impianti" checked />
+          <span>Layer <small>(geonode:impianti)</small></span>
+        </label>
+      </div>
+      <div class="hint">Clic sulla mappa per interrogare gli oggetti (GetFeatureInfo) del layer attivo.</div>
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
+    const L_IMPIANTI = "geonode:impianti";
+
+    // Map (Italia)
+    const map = L.map("map").setView([41.9, 12.6], 6);
+
+    // Basemap: SOLO Esri Satellite
+    const esriSat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, attribution: "Tiles &copy; Esri" }
+    ).addTo(map);
+
+    // WMS overlay
+    function wms(layerName) {
+      return L.tileLayer.wms(WMS_URL, {
+        layers: layerName,
+        format: "image/png",
+        transparent: true,
+        version: "1.1.1"
+      });
+    }
+    const impianti = wms(L_IMPIANTI).addTo(map);
+
+    // --- UI checkbox binding ---
+    const chk = (id) => document.getElementById(id);
+
+    function syncLayer(checkboxEl, layerObj) {
+      if (checkboxEl.checked) {
+        if (!map.hasLayer(layerObj)) map.addLayer(layerObj);
+      } else {
+        if (map.hasLayer(layerObj)) map.removeLayer(layerObj);
+      }
+    }
+    chk("chk_impianti").addEventListener("change", () => syncLayer(chk("chk_impianti"), impianti));
+    syncLayer(chk("chk_impianti"), impianti);
+
+    // ---------------------------
+    // GetFeatureInfo (JSON + fallback HTML)
+    // ---------------------------
+    function buildGFIUrl(latlng, layerName, infoFormat) {
+      const point = map.latLngToContainerPoint(latlng, map.getZoom());
+      const size = map.getSize();
+
+      // Query in EPSG:3857 (Leaflet default)
+      const bounds = map.getBounds();
+      const sw = map.options.crs.project(bounds.getSouthWest());
+      const ne = map.options.crs.project(bounds.getNorthEast());
+      const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
+
+      const params = {
+        service: "WMS",
+        version: "1.1.1",
+        request: "GetFeatureInfo",
+        layers: layerName,
+        query_layers: layerName,
+        styles: "",
+        bbox: bbox,
+        feature_count: 10,
+        height: size.y,
+        width: size.x,
+        format: "image/png",
+        info_format: infoFormat,
+        srs: "EPSG:3857",
+        x: Math.round(point.x),
+        y: Math.round(point.y)
+      };
+
+      const query = Object.keys(params)
+        .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
+        .join("&");
+
+      return `${WMS_URL}?${query}`;
+    }
+
+    async function fetchGFI(latlng, layerName) {
+      // 1) JSON
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "application/json"));
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data.features && data.features.length) return { type: "json", data };
+        }
+      } catch(e) {}
+
+      // 2) HTML fallback
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "text/html"));
+        if (r.ok) {
+          const html = await r.text();
+          if (html && html.trim().length > 0 && !html.toLowerCase().includes("no features")) {
+            return { type: "html", data: html };
+          }
+        }
+      } catch(e) {}
+
+      return null;
+    }
+
+    // ---------------------------
+    // Popup "TGS-like" card builder
+    // ---------------------------
+    function pick(props, keys) {
+      for (const k of keys) {
+        if (props && props[k] !== undefined && props[k] !== null && String(props[k]).trim() !== "") return { key: k, value: props[k] };
+      }
+      return null;
+    }
+
+    function humanizeKey(k) {
+      return String(k)
+        .replaceAll("_", " ")
+        .replaceAll("-", " ")
+        .replace(/\w/g, c => c.toUpperCase());
+    }
+
+    function buildCardHTML(title, props, idx, total) {
+      const namePick = pick(props, ["name","nome","progetto","project","impianto","windfarm","wf_name","id","codice","wtg","identificativo"]);
+      const cardTitle = namePick ? String(namePick.value) : title;
+
+      const statusPick = pick(props, ["status","stato","phase","fase"]);
+      const countryPick = pick(props, ["country","paese","nazione"]);
+      const capPick = pick(props, ["capacity_mw","capacity","capacita_mw","capacita","mw"]);
+
+      // Build key-value list (limit noisy fields)
+      const hiddenKeys = new Set(["bbox","geom","geometry","the_geom","wkb_geometry","ogc_fid","fid","id_","id"]);
+      const kv = Object.keys(props || {})
+        .filter(k => !hiddenKeys.has(k.toLowerCase()))
+        .slice(0, 40)
+        .map(k => ({ k, v: props[k] }));
+
+      const nav = (total > 1)
+        ? `<div class="wf-nav">
+             <span class="pill">${idx+1} / ${total}</span>
+             <button type="button" aria-label="precedente" onclick="__wfPrev()">&#x2190;</button>
+             <button type="button" aria-label="successivo" onclick="__wfNext()">&#x2192;</button>
+           </div>`
+        : "";
+
+      const svgIcon = `<svg class="wf-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2v8m0 0L6 7m6 3l6-3" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 10v12" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M12 14l-6 3m6-3l6 3" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+
+      const metric = (label, value, icon) => {
+        const v = (value === null || value === undefined || String(value).trim() === "") ? "—" : String(value);
+        return `<div class="wf-metric">
+          <div class="k">${icon || ""}${label}</div>
+          <div class="v">${v}</div>
+        </div>`;
+      };
+
+      const iconDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#0b1b3a;opacity:.75"></span>`;
+      const iconGlobe = `<span style="display:inline-block;width:12px;height:12px;border-radius:999px;border:2px solid rgba(11,27,58,.75)"></span>`;
+      const iconBolt = `<span style="font-weight:900;opacity:.75">⚡</span>`;
+
+      return `
+        <div class="wf-card">
+          <div class="wf-header">
+            <h2 class="wf-title">${svgIcon}<span>${cardTitle}</span></h2>
+            <button class="wf-close" type="button" onclick="__wfClose()" aria-label="chiudi">×</button>
+          </div>
+
+          <div class="wf-metrics">
+            ${metric("Status", statusPick ? statusPick.value : "—", iconDot)}
+            ${metric("Country", countryPick ? countryPick.value : "—", iconGlobe)}
+            ${metric("Capacity (MW)", capPick ? capPick.value : "—", iconBolt)}
+          </div>
+
+          <div class="wf-body">
+            <div class="wf-section">
+              <div class="wf-h2">Dettagli</div>
+              <div class="wf-kv">
+                ${kv.length ? kv.map(r => `
+                  <div class="wf-row">
+                    <div class="k" title="${humanizeKey(r.k)}">${humanizeKey(r.k)}</div>
+                    <div class="v">${(r.v === null || r.v === undefined || String(r.v).trim()==="") ? "—" : String(r.v)}</div>
+                  </div>
+                `).join("") : "<div class='wf-note'>(nessun attributo)</div>"}
+              </div>
+              ${nav}
+              <div class="wf-note">Se alcuni campi sono vuoti, dipende dagli attributi restituiti dal WMS GetFeatureInfo.</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Simple multi-feature navigation inside the popup
+    let __wfState = { feats: [], idx: 0, popup: null, title: "Impianti" };
+
+    window.__wfClose = function() {
+      map.closePopup();
+    };
+    window.__wfPrev = function() {
+      if (!__wfState.popup) return;
+      __wfState.idx = ( __wfState.idx - 1 + __wfState.feats.length ) % __wfState.feats.length;
+      const props = (__wfState.feats[__wfState.idx] || {}).properties || {};
+      __wfState.popup.setContent(buildCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length));
+    };
+    window.__wfNext = function() {
+      if (!__wfState.popup) return;
+      __wfState.idx = ( __wfState.idx + 1 ) % __wfState.feats.length;
+      const props = (__wfState.feats[__wfState.idx] || {}).properties || {};
+      __wfState.popup.setContent(buildCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length));
+    };
+
+    map.on("click", async (e) => {
+      if (!map.hasLayer(impianti)) return;
+
+      const res = await fetchGFI(e.latlng, L_IMPIANTI);
+
+      if (!res) {
+        L.popup({ maxWidth: 520 })
+          .setLatLng(e.latlng)
+          .setContent("<b>Nessun elemento interrogabile qui</b><br/><span style='font-size:12px;opacity:.8'>Se ti aspettavi risultati, verifica che il layer sia Queryable e che CORS sia abilitato.</span>")
+          .openOn(map);
+        return;
+      }
+
+      if (res.type === "json") {
+        const feats = res.data.features || [];
+        __wfState = { feats, idx: 0, popup: null, title: "Impianti" };
+
+        const props0 = (feats[0] || {}).properties || {};
+        const popup = L.popup({ maxWidth: 520, closeButton: false })
+          .setLatLng(e.latlng)
+          .setContent(buildCardHTML("Impianti", props0, 0, feats.length))
+          .openOn(map);
+
+        __wfState.popup = popup;
+
+      } else {
+        // HTML fallback in a clean container
+        const popup = L.popup({ maxWidth: 520 })
+          .setLatLng(e.latlng)
+          .setContent(`<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+            <b>Impianti</b>
+            <div style="font-size:12px;max-height:260px;overflow:auto;border:1px solid #ddd;border-radius:12px;padding:10px;margin-top:8px;background:#fff;">
+              ${res.data}
+            </div>
+          </div>`)
+          .openOn(map);
+      }
+    });
+  </script>
+</body>
+</html>
