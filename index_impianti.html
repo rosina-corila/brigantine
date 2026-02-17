@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GeoNode WMS – Impianti</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; }
+
+    .legend {
+      position: absolute;
+      z-index: 1000;
+      top: 12px;
+      left: 12px;
+      background: rgba(255,255,255,0.95);
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 320px;
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .legend h1 { font-size: 14px; margin: 0 0 8px 0; }
+    .proj { margin: 10px 0; border-top: 1px solid #eee; padding-top: 10px; }
+    .proj:first-of-type { border-top: 0; padding-top: 0; }
+    .proj-title {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 600; margin-bottom: 6px;
+    }
+    .items { margin-left: 6px; }
+    .item { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+    .item small { opacity: .75; }
+
+    .basemap {
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+    select {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      background: #fff;
+      font-size: 13px;
+    }
+    .hint { font-size: 12px; opacity: .8; margin-top: 8px; }
+    button {
+      padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd;
+      background: #fff; cursor: pointer; font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="legend">
+    <h1>Impianti (WMS)</h1>
+
+    <div class="proj">
+      <div class="proj-title">
+        <span>Impianti</span>
+        <span>
+          <button type="button" onclick="setAll(true)">ON</button>
+          <button type="button" onclick="setAll(false)">OFF</button>
+        </span>
+      </div>
+      <div class="items">
+        <label class="item">
+          <input type="checkbox" id="chk_impianti" checked />
+          <span>Layer <small>(geonode:impianti)</small></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="basemap">
+      <div class="proj-title"><span>Basemap</span></div>
+      <select id="basemapSel">
+        <option value="esri" selected>Satellite (Esri)</option>
+        <option value="osm">OpenStreetMap</option>
+      </select>
+      <div class="hint">Clic sulla mappa per interrogare gli oggetti (GetFeatureInfo) del layer attivo.</div>
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
+
+    // Layer aggiornato
+    const L_IMPIANTI = "geonode:impianti";
+
+    // Map (Italia)
+    const map = L.map("map").setView([41.9, 12.6], 6);
+
+    // Basemaps
+    const esriSat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, attribution: "Tiles &copy; Esri" }
+    ).addTo(map);
+
+    const osm = L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 20, attribution: "&copy; OpenStreetMap" }
+    );
+
+    // WMS overlay
+    function wms(layerName) {
+      return L.tileLayer.wms(WMS_URL, {
+        layers: layerName,
+        format: "image/png",
+        transparent: true,
+        version: "1.1.1"
+      });
+    }
+
+    const impianti = wms(L_IMPIANTI).addTo(map);
+
+    // --- UI checkbox bindings ---
+    const chk = (id) => document.getElementById(id);
+
+    function syncLayer(checkboxEl, layerObj) {
+      if (checkboxEl.checked) {
+        if (!map.hasLayer(layerObj)) map.addLayer(layerObj);
+      } else {
+        if (map.hasLayer(layerObj)) map.removeLayer(layerObj);
+      }
+    }
+
+    function bind(id, layerObj) {
+      const el = chk(id);
+      el.addEventListener("change", () => syncLayer(el, layerObj));
+      syncLayer(el, layerObj);
+    }
+
+    bind("chk_impianti", impianti);
+
+    window.setAll = function(on) {
+      chk("chk_impianti").checked = on;
+      syncLayer(chk("chk_impianti"), impianti);
+    };
+
+    // Basemap select
+    const basemapSel = document.getElementById("basemapSel");
+    basemapSel.addEventListener("change", () => {
+      const v = basemapSel.value;
+      if (v === "esri") {
+        if (map.hasLayer(osm)) map.removeLayer(osm);
+        if (!map.hasLayer(esriSat)) map.addLayer(esriSat);
+      } else {
+        if (map.hasLayer(esriSat)) map.removeLayer(esriSat);
+        if (!map.hasLayer(osm)) map.addLayer(osm);
+      }
+    });
+
+    // ---------------------------
+    // GetFeatureInfo (JSON + fallback HTML)
+    // ---------------------------
+    function buildGFIUrl(latlng, layerName, infoFormat) {
+      const point = map.latLngToContainerPoint(latlng, map.getZoom());
+      const size = map.getSize();
+
+      // Query in EPSG:3857 (Leaflet default)
+      const bounds = map.getBounds();
+      const sw = map.options.crs.project(bounds.getSouthWest());
+      const ne = map.options.crs.project(bounds.getNorthEast());
+      const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
+
+      const params = {
+        service: "WMS",
+        version: "1.1.1",
+        request: "GetFeatureInfo",
+        layers: layerName,
+        query_layers: layerName,
+        styles: "",
+        bbox: bbox,
+        feature_count: 10,
+        height: size.y,
+        width: size.x,
+        format: "image/png",
+        info_format: infoFormat,
+        srs: "EPSG:3857",
+        x: Math.round(point.x),
+        y: Math.round(point.y)
+      };
+
+      const query = Object.keys(params)
+        .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
+        .join("&");
+
+      return `${WMS_URL}?${query}`;
+    }
+
+    async function fetchGFI(latlng, layerName) {
+      // 1) JSON
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "application/json"));
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data.features && data.features.length) return { type: "json", data };
+        }
+      } catch(e) {}
+
+      // 2) HTML fallback
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "text/html"));
+        if (r.ok) {
+          const html = await r.text();
+          if (html && html.trim().length > 0 && !html.toLowerCase().includes("no features")) {
+            return { type: "html", data: html };
+          }
+        }
+      } catch(e) {}
+
+      return null;
+    }
+
+    function formatGeoJson(title, gj) {
+      const feats = gj.features || [];
+      let html = `<b>${title}</b><br/>`;
+      feats.slice(0, 5).forEach((f, i) => {
+        html += `<hr style="border:none;border-top:1px solid #ddd;margin:6px 0;" />`;
+        html += `<div style="font-size:12px;"><b>Feature ${i+1}</b><br/>`;
+        const props = f.properties || {};
+        const keys = Object.keys(props);
+        if (!keys.length) html += `(nessun attributo)<br/>`;
+        else keys.slice(0, 24).forEach(k => html += `<span style="opacity:.8">${k}</span>: ${props[k]}<br/>`);
+        html += `</div>`;
+      });
+      return html;
+    }
+
+    map.on("click", async (e) => {
+      if (!map.hasLayer(impianti)) return;
+
+      const res = await fetchGFI(e.latlng, L_IMPIANTI);
+
+      if (!res) {
+        L.popup()
+          .setLatLng(e.latlng)
+          .setContent("<b>Nessun elemento interrogabile qui</b><br/><span style='font-size:12px;opacity:.8'>Se ti aspettavi risultati, verifica che il layer sia Queryable e che CORS sia abilitato.</span>")
+          .openOn(map);
+        return;
+      }
+
+      const content =
+        (res.type === "json")
+          ? formatGeoJson("Impianti", res.data)
+          : `<b>Impianti</b><br/><div style="font-size:12px;max-height:220px;overflow:auto;border:1px solid #ddd;border-radius:8px;padding:6px;">${res.data}</div>`;
+
+      L.popup({ maxWidth: 520 })
+        .setLatLng(e.latlng)
+        .setContent(content)
+        .openOn(map);
+    });
+  </script>
+</body>
+</html>
