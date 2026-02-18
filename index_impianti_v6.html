@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GeoNode WMS – Impianti</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+
+    :root{
+      --panel-w: 420px;
+      --panel-w-mobile: 92vw;
+      --ease: cubic-bezier(.2,.8,.2,1);
+    }
+
+    html, body { height: 100%; margin: 0; }
+    body { position: relative; overflow: hidden; }
+
+    /* Map fills viewport; when panel is open (desktop) it makes room */
+    #map{
+      position: absolute;
+      inset: 0;
+      right: 0;
+      transition: right .25s var(--ease);
+    }
+    body.panel-open #map{
+      right: var(--panel-w);
+    }
+
+    /* Backdrop (mainly for mobile) */
+    .panel-backdrop{
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.22);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s var(--ease);
+      z-index: 9000;
+    }
+    body.panel-open .panel-backdrop{
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Side panel */
+    #infoPanel.panel{
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: var(--panel-w);
+      max-width: 46vw;
+      background: #fff;
+      border-left: 1px solid rgba(0,0,0,.10);
+      box-shadow: -14px 0 30px rgba(0,0,0,.14);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(0);
+      transition: transform .25s var(--ease);
+    }
+    #infoPanel.panel--closed{
+      transform: translateX(100%);
+    }
+
+    #infoPanel .panel__header{
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 14px;
+      background: linear-gradient(180deg, rgba(247,248,250,1) 0%, rgba(255,255,255,1) 100%);
+      border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+    #infoPanel .panel__title{
+      font-weight: 750;
+      letter-spacing: .2px;
+    }
+    #infoPanel .panel__close{
+      border: 1px solid rgba(0,0,0,.10);
+      background: rgba(255,255,255,.9);
+      border-radius: 999px;
+      font-size: 16px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 8px 10px;
+      transition: transform .12s var(--ease), background .12s var(--ease);
+    }
+    #infoPanel .panel__close:hover{ transform: scale(1.04); background: #fff; }
+
+    /* Content takes all remaining height */
+    #infoPanel .panel__content{
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    #infoPanel .panel__empty{
+      opacity: .7;
+      font-size: 13px;
+    }
+
+    /* Mobile: panel overlays map, map does NOT shrink */
+    @media (max-width: 820px){
+      body.panel-open #map{ right: 0; }
+      #infoPanel.panel{ width: var(--panel-w-mobile); max-width: var(--panel-w-mobile); }
+    }
+
+/* Left panel */
+    .legend {
+      position: absolute;
+      z-index: 1000;
+      top: 12px;
+      left: 12px;
+      background: rgba(255,255,255,0.96);
+      padding: 10px 12px;
+      border-radius: 12px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.16);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 320px;
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .legend h1 { font-size: 14px; margin: 0 0 8px 0; }
+    .proj { margin: 10px 0; }
+    .proj-title {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 650; margin-bottom: 6px;
+    }
+    .items { margin-left: 6px; }
+    .item { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+    .item small { opacity: .75; }
+    .hint { font-size: 12px; opacity: .8; margin-top: 8px; line-height: 1.25; }
+
+    /* Popup card styles (inspired by your screenshot) */
+    .wf-card {
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 360px;
+      max-width: 90vw;
+    }
+    .wf-header {
+      position: relative;
+      padding: 14px 14px 10px 14px;
+      background: #f5f6fb;
+      border-radius: 14px 14px 0 0;
+      border: 1px solid rgba(0,0,0,.08);
+      border-bottom: none;
+    }
+    .wf-title {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: .2px;
+      color: #0b1b3a;
+      line-height: 1.15;
+      margin: 0;
+      padding-right: 44px;
+    }
+    .wf-icon {
+      width: 22px; height: 22px; margin-top: 2px; flex: 0 0 auto;
+    }
+    .wf-close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 34px; height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: rgba(255,255,255,.85);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .wf-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 10px 14px 14px 14px;
+      background: #f5f6fb;
+      border-left: 1px solid rgba(0,0,0,.08);
+      border-right: 1px solid rgba(0,0,0,.08);
+      border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+    .wf-metric {
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(255,255,255,.8);
+      border: 1px solid rgba(0,0,0,.08);
+      min-height: 52px;
+    }
+    .wf-metric .k {
+      font-size: 11px;
+      color: rgba(11,27,58,.7);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      font-weight: 650;
+      text-transform: none;
+    }
+    .wf-metric .v {
+      font-size: 13px;
+      font-weight: 750;
+      color: #0b1b3a;
+      word-break: break-word;
+    }
+    .wf-body {
+      border: 1px solid rgba(0,0,0,.08);
+      border-top: none;
+      border-radius: 0 0 14px 14px;
+      background: #ffffff;
+      padding: 12px 14px 14px 14px;
+      max-height: 320px;
+      overflow: auto;
+    }
+
+    /* When the card is rendered inside the right side panel, it should use
+       the full column height (no inner scrollbar). The panel itself will scroll. */
+    #panelContent .wf-card{
+      width: 100%;
+      max-width: none;
+    }
+    #panelContent .wf-body{
+      max-height: none;
+      overflow: visible;
+    }
+    .wf-section {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(0,0,0,.08);
+    }
+    .wf-section:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    .wf-h2 {
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      font-weight: 850;
+      color: #0b1b3a;
+    }
+    .wf-kv {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .wf-row {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .wf-row .k {
+      color: rgba(11,27,58,.65);
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .wf-row .v {
+      color: #0b1b3a;
+      font-weight: 650;
+      word-break: break-word;
+    }
+
+    .wf-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .wf-nav .pill {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: #0b1b3a;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .wf-nav button {
+      width: 34px; height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: #0b1b3a;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+    .wf-note {
+      font-size: 12px;
+      color: rgba(11,27,58,.65);
+      margin-top: 8px;
+      line-height: 1.2;
+    }
+
+    /* Leaflet popup tweaks */
+    .leaflet-popup-content { margin: 10px 10px; }
+    .leaflet-popup-content-wrapper { border-radius: 16px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="panelBackdrop" class="panel-backdrop" aria-hidden="true"></div>
+
+  <aside id="infoPanel" class="panel panel--closed" aria-label="Dettagli elemento">
+    <div class="panel__header">
+      <div class="panel__title">Dettagli</div>
+      <button id="panelClose" class="panel__close" type="button" aria-label="Chiudi">✕</button>
+    </div>
+    <div id="panelContent" class="panel__content">
+      <div class="panel__empty">Clicca un elemento sulla mappa per vedere i dettagli.</div>
+    </div>
+  </aside>
+
+  <div class="legend">
+    <h1>Impianti (WMS)</h1>
+
+    <div class="proj">
+      <div class="proj-title">
+        <span>Impianti</span>
+      </div>
+      <div class="items">
+        <label class="item">
+          <input type="checkbox" id="chk_impianti" checked />
+          <span>Layer <small>(geonode:impianti)</small></span>
+        </label>
+      </div>
+      <div class="hint">Clic sulla mappa per interrogare gli oggetti (GetFeatureInfo) del layer attivo.</div>
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
+    const L_IMPIANTI = "geonode:impianti";
+
+    // Map (Italia)
+    const map = L.map("map").setView([41.9, 12.6], 6);
+
+    // Basemap: SOLO Esri Satellite
+    const esriSat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, attribution: "Tiles &copy; Esri" }
+    ).addTo(map);
+
+    // WMS overlay
+    function wms(layerName) {
+      return L.tileLayer.wms(WMS_URL, {
+        layers: layerName,
+        format: "image/png",
+        transparent: true,
+        version: "1.1.1"
+      });
+    }
+    const impianti = wms(L_IMPIANTI).addTo(map);
+
+    // --- UI checkbox binding ---
+    const chk = (id) => document.getElementById(id);
+
+    function syncLayer(checkboxEl, layerObj) {
+      if (checkboxEl.checked) {
+        if (!map.hasLayer(layerObj)) map.addLayer(layerObj);
+      } else {
+        if (map.hasLayer(layerObj)) map.removeLayer(layerObj);
+      }
+    }
+    chk("chk_impianti").addEventListener("change", () => syncLayer(chk("chk_impianti"), impianti));
+    syncLayer(chk("chk_impianti"), impianti);
+
+
+    // ---------------------------
+    // Right side info panel helpers
+    // ---------------------------
+    const infoPanel = document.getElementById("infoPanel");
+    const panelContent = document.getElementById("panelContent");
+    const panelClose = document.getElementById("panelClose");
+    const panelBackdrop = document.getElementById("panelBackdrop");
+
+    function openPanel(html) {
+      panelContent.innerHTML = html;
+      infoPanel.classList.remove("panel--closed");
+      document.body.classList.add("panel-open");
+    }
+
+    function closePanel() {
+      infoPanel.classList.add("panel--closed");
+      document.body.classList.remove("panel-open");
+    }
+
+    panelClose.addEventListener("click", closePanel);
+    panelBackdrop.addEventListener("click", closePanel);
+// ---------------------------
+    // GetFeatureInfo (JSON + fallback HTML)
+    // ---------------------------
+    function buildGFIUrl(latlng, layerName, infoFormat) {
+      const point = map.latLngToContainerPoint(latlng, map.getZoom());
+      const size = map.getSize();
+
+      // Query in EPSG:3857 (Leaflet default)
+      const bounds = map.getBounds();
+      const sw = map.options.crs.project(bounds.getSouthWest());
+      const ne = map.options.crs.project(bounds.getNorthEast());
+      const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
+
+      const params = {
+        service: "WMS",
+        version: "1.1.1",
+        request: "GetFeatureInfo",
+        layers: layerName,
+        query_layers: layerName,
+        styles: "",
+        bbox: bbox,
+        feature_count: 10,
+        height: size.y,
+        width: size.x,
+        format: "image/png",
+        info_format: infoFormat,
+        srs: "EPSG:3857",
+        x: Math.round(point.x),
+        y: Math.round(point.y)
+      };
+
+      const query = Object.keys(params)
+        .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
+        .join("&");
+
+      return `${WMS_URL}?${query}`;
+    }
+
+    async function fetchGFI(latlng, layerName) {
+      // 1) JSON
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "application/json"));
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data.features && data.features.length) return { type: "json", data };
+        }
+      } catch(e) {}
+
+      // 2) HTML fallback
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "text/html"));
+        if (r.ok) {
+          const html = await r.text();
+          if (html && html.trim().length > 0 && !html.toLowerCase().includes("no features")) {
+            return { type: "html", data: html };
+          }
+        }
+      } catch(e) {}
+
+      return null;
+    }
+
+    // ---------------------------
+    // Popup "TGS-like" card builder
+    // ---------------------------
+    function pick(props, keys) {
+      for (const k of keys) {
+        if (props && props[k] !== undefined && props[k] !== null && String(props[k]).trim() !== "") return { key: k, value: props[k] };
+      }
+      return null;
+    }
+
+    function humanizeKey(k) {
+  const labels = {
+    stato_ist: "Stato procedura",
+    regione: "Regione",
+    potenza_im: "Potenza installata (MW)",
+    proponente: "Proponente",
+    comune: "Comune",
+    tipologia: "Tipologia impianto",
+    area_marit: "Area marina",
+    descr_prog: "Descrizione",
+    data_avv: "Data avvio",
+    data_concl: "Data conclusione",
+    tipo_imp: "Tipologia impianto",
+    prog_sintetico: "Sintesi progetto",
+    vita_imp: "Durata impianto",
+    num_turb: "Numero turbine",
+    link: "Documenti uff",
+    comp: "Progetto",
+    provincia: "Provincia"
+  };
+
+  return labels[k] || k
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatValue(key, value) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return "—";
+  }
+
+  // Se il campo è "link", rendilo cliccabile
+  if (key === "link") {
+    const url = String(value).trim();
+
+    return `
+      <a href="${url}" 
+         target="_blank" 
+         rel="noopener noreferrer"
+         style="color:#0b1b3a;font-weight:700;text-decoration:underline;">
+         Apri documento
+      </a>
+    `;
+  }
+
+  return String(value);
+}
+    function buildCardHTML(title, props, idx, total) {
+      const namePick = pick(props, ["name","nome","progetto","project","impianto","windfarm","wf_name","id","codice","wtg","identificativo"]);
+      const cardTitle = namePick ? String(namePick.value) : title;
+
+      const statusPick = pick(props, ["stato_ist"]);
+      const countryPick = pick(props, ["regione"]);
+      const capPick = pick(props, ["potenza_im"]);
+
+      // Build key-value list (limit noisy fields)
+      const hiddenKeys = new Set(["bbox","geom","geometry","the_geom","wkb_geometry","ogc_fid","fid","id_","id","link2","link3"]);
+// ordine preferito dei campi (usa i NOMI REALI del layer)
+const fieldOrder = [
+  "comp",           // Progetto
+  "proponente",
+  "regione",
+  "provincia",
+  "comune",
+  "stato_ist",
+  "potenza_im",
+  "tecnologia",
+  "num_turb",       // Numero turbine (se così nel tuo gpkg)
+  "n_turbine",      // eventuale variante
+  "vita_imp",
+  "prog_sintetico",
+  "descr_prog",
+  "link"
+];
+
+// costruisci kv mostrando solo i campi presenti e non vuoti
+const kv = fieldOrder
+  .filter(k => props && props[k] !== undefined && props[k] !== null && String(props[k]).trim() !== "")
+  .map(k => ({ k, v: props[k] }));
+
+      const nav = (total > 1)
+        ? `<div class="wf-nav">
+             <span class="pill">${idx+1} / ${total}</span>
+             <button type="button" aria-label="precedente" onclick="__wfPrev()">&#x2190;</button>
+             <button type="button" aria-label="successivo" onclick="__wfNext()">&#x2192;</button>
+           </div>`
+        : "";
+
+      const svgIcon = `<svg class="wf-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2v8m0 0L6 7m6 3l6-3" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 10v12" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M12 14l-6 3m6-3l6 3" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+
+      const metric = (label, value, icon) => {
+        const v = (value === null || value === undefined || String(value).trim() === "") ? "—" : String(value);
+        return `<div class="wf-metric">
+          <div class="k">${icon || ""}${label}</div>
+          <div class="v">${v}</div>
+        </div>`;
+      };
+
+      const iconDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#0b1b3a;opacity:.75"></span>`;
+      const iconGlobe = `<span style="display:inline-block;width:12px;height:12px;border-radius:999px;border:2px solid rgba(11,27,58,.75)"></span>`;
+      const iconBolt = `<span style="font-weight:900;opacity:.75">⚡</span>`;
+
+      return `
+        <div class="wf-card">
+          <div class="wf-header">
+            <h2 class="wf-title">${svgIcon}<span>${cardTitle}</span></h2>
+            <button class="wf-close" type="button" onclick="__wfClose()" aria-label="chiudi">×</button>
+          </div>
+
+          <div class="wf-metrics">
+            ${metric("Status", statusPick ? statusPick.value : "—", iconDot)}
+            ${metric("Region", countryPick ? countryPick.value : "—", iconGlobe)}
+            ${metric("Capacity (MW)", capPick ? capPick.value : "—", iconBolt)}
+          </div>
+
+          <div class="wf-body">
+            <div class="wf-section">
+              <div class="wf-h2">Dettagli</div>
+              <div class="wf-kv">
+                ${kv.length ? kv.map(r => `
+                  <div class="wf-row">
+  <div class="k">${humanizeKey(r.k)}</div>
+  <div class="v">
+    ${formatValue(r.k, r.v)}
+  </div>
+</div>
+                `).join("") : "<div class='wf-note'>(nessun attributo)</div>"}
+              </div>
+              ${nav}
+              <div class="wf-note">Se alcuni campi sono vuoti, dipende dagli attributi restituiti dal WMS GetFeatureInfo.</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    
+    // Simple multi-feature navigation inside the side panel
+    let __wfState = { feats: [], idx: 0, title: "Impianti" };
+
+    window.__wfClose = function() {
+      closePanel();
+    };
+
+    window.__wfPrev = function() {
+      if (!__wfState.feats.length) return;
+      __wfState.idx = (__wfState.idx - 1 + __wfState.feats.length) % __wfState.feats.length;
+      const props = (__wfState.feats[__wfState.idx] || {}).properties || {};
+      openPanel(buildCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length));
+    };
+
+    window.__wfNext = function() {
+      if (!__wfState.feats.length) return;
+      __wfState.idx = (__wfState.idx + 1) % __wfState.feats.length;
+      const props = (__wfState.feats[__wfState.idx] || {}).properties || {};
+      openPanel(buildCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length));
+    };
+
+
+
+    map.on("click", async (e) => {
+      if (!map.hasLayer(impianti)) return;
+
+      const res = await fetchGFI(e.latlng, L_IMPIANTI);
+
+      if (!res) {
+        openPanel(
+          `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+             <div style="font-weight:800;font-size:16px;margin-bottom:6px;color:#0b1b3a;">Nessun elemento interrogabile qui</div>
+             <div style="font-size:13px;opacity:.85;line-height:1.25;">
+               Se ti aspettavi risultati, verifica che il layer sia <b>Queryable</b> e che il browser non stia bloccando la richiesta (CORS / pagina servita da webserver).
+             </div>
+           </div>`
+        );
+        return;
+      }
+
+      if (res.type === "json") {
+        const feats = res.data.features || [];
+        __wfState = { feats, idx: 0, title: "Impianti" };
+
+        const props0 = (feats[0] || {}).properties || {};
+        openPanel(buildCardHTML("Impianti", props0, 0, feats.length));
+
+      } else {
+        // HTML fallback in a clean container
+        openPanel(
+          `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+             <div style="font-weight:800;font-size:16px;margin-bottom:6px;color:#0b1b3a;">Impianti</div>
+             <div style="font-size:12px;max-height:70vh;overflow:auto;border:1px solid rgba(0,0,0,.12);border-radius:12px;padding:10px;background:#fff;">
+               ${res.data}
+             </div>
+           </div>`
+        );
+      }
+    });
+  </script>
+</body>
+</html>
