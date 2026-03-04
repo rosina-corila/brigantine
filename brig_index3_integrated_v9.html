@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BRIG - MSP + Environmental Compliance + AI Analysis</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    * { box-sizing: border-box; }
+    .layout { height: 100%; display: grid; grid-template-columns: 310px 1fr 380px; }
+    #sidebar { border-right: 1px solid #ddd; padding: 12px; overflow-y: auto; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-size: 13px; background: #fcfcfc; }
+    .title { font-weight: 700; margin: 0 0 8px 0; }
+    .hint { color: #555; font-size: 12px; margin: 0 0 12px 0; }
+    .search { width: 100%; padding: 8px; margin: 0 0 10px 0; box-sizing: border-box; font-size: 13px; }
+    .attr-list { list-style: none; padding: 0; margin: 0; }
+    .attr-list li { margin: 0; }
+    .attr-btn { width: 100%; text-align: left; padding: 8px 10px; border: 1px solid #e6e6e6; background: #fff; border-radius: 8px; margin-bottom: 6px; cursor: pointer; font-size: 12px; }
+    .attr-btn.active { border-color: #999; font-weight: 600; }
+    .block { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; }
+    .legend { font-size: 12px; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.15); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .status { font-size: 12px; color: #333; }
+    .warn { color: #8a2b2b; }
+    .section-header { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; margin: 0 0 8px 0; color: #333; cursor: pointer; user-select: none; }
+    .section-header .chevron { transition: transform 0.2s; font-size: 10px; }
+    .section-header .chevron.collapsed { transform: rotate(-90deg); }
+    .section-body.collapsed { display: none; }
+    .msp-layer-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; }
+    .msp-layer-item input[type="checkbox"] { margin: 0; }
+    .msp-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; }
+    .msp-badge.sid { background: #e0f2fe; color: #0369a1; }
+    .msp-discover-btn { width: 100%; padding: 6px; margin-top: 6px; font-size: 11px; background: #0369a1; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    .msp-discover-btn:hover { background: #0284c7; }
+    .msp-discover-btn:disabled { background: #94a3b8; cursor: wait; }
+    .msp-status { font-size: 11px; color: #666; margin-top: 4px; }
+    #debugPanel { margin-top: 8px; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 10px; font-size: 12px; max-height: 25vh; overflow-y: auto; }
+    .debug-entry { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
+    .debug-entry:last-child { border-bottom: none; }
+    .debug-label { font-weight: 600; color: #333; margin-bottom: 2px; }
+    .debug-url { word-break: break-all; color: #06c; font-size: 11px; font-family: monospace; margin: 2px 0 4px 0; }
+    .debug-url a { color: #06c; }
+    .debug-status { font-size: 11px; margin: 2px 0; }
+    .debug-status.ok { color: #2a7; }
+    .debug-status.err { color: #c33; }
+    .debug-body { background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; }
+    .clear-btn { font-size: 11px; padding: 3px 8px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+    .clear-btn:hover { background: #eee; }
+    #map { height: 100%; }
+    #infoPanel { border-left: 1px solid #ddd; display: flex; flex-direction: column; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-size: 13px; background: #fafafa; }
+    .panel-tabs { display: flex; border-bottom: 2px solid #e5e7eb; background: #fff; flex-shrink: 0; }
+    .panel-tab { flex: 1; padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 600; cursor: pointer; border: none; background: transparent; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+    .panel-tab.active { color: #0369a1; border-bottom-color: #0369a1; }
+    .panel-tab:hover { background: #f0f9ff; }
+    .panel-tab-content { flex: 1; overflow-y: auto; padding: 12px; }
+    .panel-tab-content.hidden { display: none; }
+    .gfi-placeholder { color: #999; font-size: 12px; font-style: italic; }
+    .gfi-loading { color: #888; font-size: 13px; }
+    .gfi-coords { font-size: 11px; color: #777; margin-bottom: 10px; font-family: monospace; }
+    .gfi-section { margin-bottom: 14px; }
+    .gfi-section-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px 6px 0 0; font-size: 13px; font-weight: 700; }
+    .gfi-section-header .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .gfi-feature-card { background: #fff; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 6px 6px; padding: 0; overflow: hidden; }
+    .gfi-attr-row { display: flex; padding: 5px 10px; font-size: 12px; border-bottom: 1px solid #f0f0f0; gap: 8px; }
+    .gfi-attr-row:last-child { border-bottom: none; }
+    .gfi-attr-row:hover { background: #f8f9fa; }
+    .gfi-attr-key { flex: 0 0 40%; color: #666; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; word-break: break-word; }
+    .gfi-attr-val { flex: 1; color: #222; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .gfi-empty { font-size: 12px; color: #999; font-style: italic; padding: 10px; }
+    .method-tag { font-size: 9px; padding: 2px 6px; border-radius: 3px; color: #fff; font-weight: 600; }
+    .method-fetch { background: #2a7; }
+    .method-jsonp { background: #c80; }
+    .method-fail { background: #c33; }
+    .dash-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .dash-header h4 { margin: 0; font-size: 14px; font-weight: 700; color: #333; }
+    .dash-reg-select { font-size: 11px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+    .dash-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+    .dash-row { display: flex; align-items: center; padding: 7px 10px; border-bottom: 1px solid #f0f0f0; gap: 10px; font-size: 12px; }
+    .dash-row:last-child { border-bottom: none; }
+    .dash-light { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.1); }
+    .dash-light.green { background: #22c55e; box-shadow: 0 0 4px #22c55e88; }
+    .dash-light.yellow { background: #eab308; box-shadow: 0 0 4px #eab30888; }
+    .dash-light.red { background: #ef4444; box-shadow: 0 0 4px #ef444488; }
+    .dash-light.gray { background: #d1d5db; }
+    .dash-param { flex: 0 0 38%; font-weight: 600; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .dash-value { flex: 1; font-family: ui-monospace, monospace; font-size: 12px; color: #222; }
+    .dash-limit { flex: 0 0 auto; font-size: 10px; color: #888; text-align: right; white-space: nowrap; }
+    .dash-summary { display: flex; gap: 12px; margin-bottom: 10px; padding: 8px 10px; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 12px; }
+    .dash-summary-item { display: flex; align-items: center; gap: 4px; }
+    .dash-summary-count { font-weight: 700; font-size: 14px; }
+    .dash-note { font-size: 10px; color: #999; margin-top: 6px; line-height: 1.4; }
+    .ai-btn { width: 100%; padding: 10px; margin: 12px 0; font-size: 13px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; }
+    .ai-btn-primary { background: linear-gradient(135deg, #0369a1, #0e7490); color: #fff; }
+    .ai-btn-primary:hover { background: linear-gradient(135deg, #0284c7, #14b8a6); }
+    .ai-btn-primary:disabled { background: #94a3b8; cursor: wait; }
+    .ai-response { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+    .ai-response h4 { margin: 0 0 6px 0; font-size: 13px; color: #0369a1; }
+    .ai-placeholder { color: #999; font-size: 12px; font-style: italic; text-align: center; padding: 20px; }
+    .ai-context-summary { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 10px; font-size: 11px; margin-bottom: 10px; line-height: 1.5; }
+    .ai-context-summary strong { color: #0369a1; }
+    .ai-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside id="sidebar">
+    <div class="block" style="border-top:none;margin-top:0;padding-top:0;">
+      <h4 class="title" style="font-size:14px;">Layer Traiettoria</h4>
+      <select id="layerSelect" class="search"></select>
+    </div>
+    <div class="block">
+      <div class="section-header" onclick="toggleSection('solveSection')">
+        <span class="chevron" id="solveSectionChevron">&#9660;</span> Overlay SOLVE
+      </div>
+      <div id="solveSection" class="section-body">
+        <label class="msp-layer-item"><input type="checkbox" id="toggleSolveGeeLayer" checked /> gee_best_practive</label>
+      </div>
+    </div>
+    <div class="block">
+      <div class="section-header" onclick="toggleSection('mspSection')">
+        <span class="chevron" id="mspSectionChevron">&#9660;</span> &#127754; PSM - Piano Spaziale Marittimo
+      </div>
+      <div id="mspSection" class="section-body">
+        <p class="hint" style="margin-bottom:6px;">Layer dal SID - Portale del Mare (MIT)</p>
+        <div id="mspLayerList"><div class="msp-status">Premi "Scopri layer" per caricare i layer WMS dal SID.</div></div>
+        <button id="discoverBtn" class="msp-discover-btn" onclick="discoverSIDLayers()">&#128269; Scopri layer dal SID</button>
+        <div id="mspDiscoverStatus" class="msp-status"></div>
+      </div>
+    </div>
+    <div class="block">
+      <div class="section-header" onclick="toggleSection('attrSection')">
+        <span class="chevron" id="attrSectionChevron">&#9660;</span> TOC Attributi
+      </div>
+      <div id="attrSection" class="section-body">
+        <p class="hint">Clicca un attributo per tematizzare.</p>
+        <input id="search" class="search" placeholder="Filtra attributi..." />
+        <ul id="attrList" class="attr-list"></ul>
+      </div>
+    </div>
+    <div class="block">
+      <div class="status">
+        <div><b>Layer:</b> <span class="mono" id="layerName"></span></div>
+        <div><b>Modalit&agrave;:</b> <span id="mode"></span></div>
+        <div><b>Feature caricate:</b> <span id="count"></span></div>
+        <div id="note" class="warn"></div>
+      </div>
+    </div>
+    <div class="block">
+      <h4 class="title" style="font-size:14px;">Legenda</h4>
+      <div id="legend" class="legend"></div>
+    </div>
+    <div class="block">
+      <div class="section-header" onclick="toggleSection('debugSection')">
+        <span class="chevron collapsed" id="debugSectionChevron">&#9660;</span> Debug GFI
+      </div>
+      <div id="debugSection" class="section-body collapsed">
+        <button class="clear-btn" onclick="document.getElementById('debugLog').innerHTML=''">Pulisci</button>
+        <div id="debugPanel"><div id="debugLog"><span class="hint">Clicca sulla mappa per interrogare i layer WMS...</span></div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div id="map"></div>
+
+  <div id="infoPanel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-tab="tabInfo" onclick="switchTab(this,'tabInfo')">&#128203; Info</button>
+      <button class="panel-tab" data-tab="tabCompliance" onclick="switchTab(this,'tabCompliance')">&#128678; Compliance</button>
+      <button class="panel-tab" data-tab="tabAI" onclick="switchTab(this,'tabAI')">&#129302; AI Analysis</button>
+    </div>
+    <div id="tabInfo" class="panel-tab-content">
+      <div id="gfiContent"><div class="gfi-placeholder">Clicca su un punto della traiettoria per vedere i dati ambientali e la zona PSM.</div></div>
+    </div>
+    <div id="tabCompliance" class="panel-tab-content hidden">
+      <div id="complianceContent"><div class="gfi-placeholder">Seleziona un punto per vedere la conformit&agrave; ambientale.</div></div>
+    </div>
+    <div id="tabAI" class="panel-tab-content hidden">
+      <div id="aiContent"><div class="ai-placeholder">Seleziona un punto sulla traiettoria per attivare l'analisi AI.<br><br>L'analisi combiner&agrave;:<br>&bull; Parametri ambientali rilevati<br>&bull; Zona PSM e destinazioni d'uso<br>&bull; Normative di riferimento<br><br>Per generare un report di compatibilit&agrave; automatico.</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// === CONFIG ===
+const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
+const OWS_URL = "https://solve.corila.it/geoserver/geonode/ows";
+const SID_WMS_URL = "https://sid.mit.gov.it/ppsm2/wms";
+let CURRENT_TYPE_NAME = "geonode:traiettoria";
+const AVAILABLE_LAYERS = {
+  "Traiettoria Marano": "geonode:traiettoria",
+  "Traiettoria Numana": "geonode:traiettoria_numana",
+  "Traiettoria Passetto": "geonode:traiettoria_passetto",
+  "Traiettoria Torrette": "geonode:traiettoria_torrette",
+  "Traiettoria Pola": "geonode:traiettoria_pola"
+};
+const TOC_ATTRS = ["Conductivity","Depth","Oxygen percentage","Oxygen ppm","Ph","Pressure","Salinity","SOG","Temperature"];
+const ATTR_FIELD_MAP = { "Conductivity":"conductivity","Depth":"depth","Oxygen percentage":"oxygen_percentage","Oxygen ppm":"oxygen_ppm","Ph":"ph","Pressure":"pressure","Salinity":"salinity","SOG":"sog","Temperature":"temperature" };
+
+// === REGULATIONS ===
+const REGULATIONS = {
+  "dlgs152": { name: "D.Lgs. 152/2006", description: "Norme in materia ambientale - Parte III, Allegato 1", params: {
+    oxygen_percentage: { label: "Ossigeno %", unit: "%", green: { min: 80, max: Infinity, label: "\u2265 80%" }, yellow: { min: 60, max: 80, label: "60\u201380%" }, red: { min: -Infinity, max: 60, label: "< 60%" } },
+    oxygen_ppm: { label: "Ossigeno", unit: "mg/L", green: { min: 6, max: Infinity, label: "\u2265 6 mg/L" }, yellow: { min: 4, max: 6, label: "4\u20136 mg/L" }, red: { min: -Infinity, max: 4, label: "< 4 mg/L" } },
+    ph: { label: "pH", unit: "", green: { min: 7.0, max: 8.5, label: "7.0\u20138.5" }, yellow: { min: 6.5, max: 7.0, label: "6.5\u20137.0 o 8.5\u20139.0", yellowMax: 9.0 }, red: { min: -Infinity, max: 6.5, label: "< 6.5 o > 9.0", redMax: Infinity } },
+    temperature: { label: "Temperatura", unit: "\u00b0C", green: { min: 10, max: 28, label: "10\u201328 \u00b0C" }, yellow: { min: 5, max: 10, label: "5\u201310 o 28\u201332 \u00b0C", yellowMax: 32 }, red: { min: -Infinity, max: 5, label: "< 5 o > 32 \u00b0C", redMax: Infinity } },
+    salinity: { label: "Salinit\u00e0", unit: "PSU", green: { min: 30, max: 40, label: "30\u201340 PSU" }, yellow: { min: 25, max: 30, label: "25\u201330 o 40\u201345 PSU", yellowMax: 45 }, red: { min: -Infinity, max: 25, label: "< 25 o > 45 PSU", redMax: Infinity } },
+    conductivity: { label: "Conducibilit\u00e0", unit: "mS/cm", green: { min: 45, max: 55, label: "45\u201355 mS/cm" }, yellow: { min: 35, max: 45, label: "35\u201345 o 55\u201365 mS/cm", yellowMax: 65 }, red: { min: -Infinity, max: 35, label: "< 35 o > 65 mS/cm", redMax: Infinity } }
+  }},
+  "wfd": { name: "Direttiva 2000/60/CE (WFD)", description: "Direttiva Quadro Acque - Classificazione stato ecologico", params: {
+    oxygen_percentage: { label: "Ossigeno %", unit: "%", green: { min: 80, max: Infinity, label: "\u2265 80% (Elevato)" }, yellow: { min: 60, max: 80, label: "60\u201380% (Buono)" }, red: { min: -Infinity, max: 60, label: "< 60% (Scarso)" } },
+    oxygen_ppm: { label: "Ossigeno disciolto", unit: "mg/L", green: { min: 5.7, max: Infinity, label: "\u2265 5.7 (Elevato)" }, yellow: { min: 4.0, max: 5.7, label: "4.0\u20135.7 (Buono)" }, red: { min: -Infinity, max: 4.0, label: "< 4.0 (Scarso)" } },
+    ph: { label: "pH", unit: "", green: { min: 7.5, max: 8.5, label: "7.5\u20138.5" }, yellow: { min: 7.0, max: 7.5, label: "7.0\u20137.5 o 8.5\u20139.0", yellowMax: 9.0 }, red: { min: -Infinity, max: 7.0, label: "< 7.0 o > 9.0", redMax: Infinity } },
+    temperature: { label: "Temperatura", unit: "\u00b0C", green: { min: 12, max: 26, label: "12\u201326 \u00b0C (tipico)" }, yellow: { min: 8, max: 12, label: "8\u201312 o 26\u201330 \u00b0C", yellowMax: 30 }, red: { min: -Infinity, max: 8, label: "< 8 o > 30 \u00b0C", redMax: Infinity } },
+    salinity: { label: "Salinit\u00e0", unit: "PSU", green: { min: 33, max: 38, label: "33\u201338 PSU" }, yellow: { min: 28, max: 33, label: "28\u201333 o 38\u201342 PSU", yellowMax: 42 }, red: { min: -Infinity, max: 28, label: "< 28 o > 42 PSU", redMax: Infinity } },
+    conductivity: { label: "Conducibilit\u00e0", unit: "mS/cm", green: { min: 48, max: 56, label: "48\u201356 mS/cm" }, yellow: { min: 38, max: 48, label: "38\u201348 o 56\u201365 mS/cm", yellowMax: 65 }, red: { min: -Infinity, max: 38, label: "< 38 o > 65 mS/cm", redMax: Infinity } }
+  }},
+  "msfd": { name: "Direttiva 2008/56/CE (MSFD)", description: "Strategia Marina - Descrittore 5 (Eutrofizzazione) e D.Lgs. 190/2010", params: {
+    oxygen_ppm: { label: "Ossigeno disciolto", unit: "mg/L", green: { min: 5.0, max: Infinity, label: "\u2265 5.0 (GES)" }, yellow: { min: 3.5, max: 5.0, label: "3.5\u20135.0 (soglia)" }, red: { min: -Infinity, max: 3.5, label: "< 3.5 (non GES)" } },
+    oxygen_percentage: { label: "Ossigeno %", unit: "%", green: { min: 75, max: Infinity, label: "\u2265 75% (GES)" }, yellow: { min: 50, max: 75, label: "50\u201375% (soglia)" }, red: { min: -Infinity, max: 50, label: "< 50% (non GES)" } },
+    ph: { label: "pH", unit: "", green: { min: 7.8, max: 8.4, label: "7.8\u20138.4 (tipico)" }, yellow: { min: 7.5, max: 7.8, label: "7.5\u20137.8 o 8.4\u20138.6", yellowMax: 8.6 }, red: { min: -Infinity, max: 7.5, label: "< 7.5 o > 8.6", redMax: Infinity } },
+    temperature: { label: "Temperatura", unit: "\u00b0C", green: { min: 10, max: 28, label: "10\u201328 \u00b0C" }, yellow: { min: 6, max: 10, label: "6\u201310 o 28\u201332 \u00b0C", yellowMax: 32 }, red: { min: -Infinity, max: 6, label: "< 6 o > 32 \u00b0C", redMax: Infinity } },
+    salinity: { label: "Salinit\u00e0", unit: "PSU", green: { min: 30, max: 40, label: "30\u201340 PSU" }, yellow: { min: 25, max: 30, label: "25\u201330 o 40\u201345 PSU", yellowMax: 45 }, red: { min: -Infinity, max: 25, label: "< 25 o > 45 PSU", redMax: Infinity } }
+  }}
+};
+let currentRegulation = "dlgs152";
+
+// === STATE ===
+let geojsonData = null, vectorLayer = null, currentAttr = null, queryCounter = 0, jsonpCounter = 0;
+const activeSIDLayers = {};
+let discoveredSIDLayers = [];
+window._lastClickedProps = null;
+window._lastClickedLatlng = null;
+window._lastMSPInfo = null;
+
+// === UI ===
+function toggleSection(id) { document.getElementById(id).classList.toggle('collapsed'); document.getElementById(id+'Chevron').classList.toggle('collapsed'); }
+function switchTab(btn, tabId) { document.querySelectorAll('.panel-tab-content').forEach(t=>t.classList.add('hidden')); document.querySelectorAll('.panel-tab').forEach(t=>t.classList.remove('active')); document.getElementById(tabId).classList.remove('hidden'); btn.classList.add('active'); }
+function escapeHtml(s) { if(!s) return "(vuoto)"; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+// === SEMAPHORE ===
+function evaluateParam(value, th) {
+  if (value===null||value===undefined||value==="") return "gray";
+  const n = (typeof value==="number")?value:Number(String(value).replace(",","."));
+  if (!Number.isFinite(n)) return "gray";
+  const g=th.green, y=th.yellow;
+  if (g.min!==-Infinity && g.max!==Infinity) { if(n>=g.min&&n<=g.max) return "green"; const yM=y.yellowMax||y.max; if((n>=y.min&&n<g.min)||(n>g.max&&n<=yM)) return "yellow"; return "red"; }
+  if (n>=g.min) return "green"; if (n>=y.min) return "yellow"; return "red";
+}
+function renderSemaphore(props) {
+  const reg=REGULATIONS[currentRegulation]; if(!reg) return "";
+  const results=[]; for(const[f,th] of Object.entries(reg.params)){const v=props[f],s=evaluateParam(v,th),n=(v!==null&&v!==undefined&&v!=="")?Number(String(v).replace(",",".")):null;const dv=(n!==null&&Number.isFinite(n))?n.toLocaleString("it-IT",{maximumFractionDigits:2})+(th.unit?" "+th.unit:""):"n/d";results.push({field:f,th,status:s,displayVal:dv});}
+  const c={green:0,yellow:0,red:0,gray:0}; results.forEach(r=>c[r.status]++);
+  let h=`<div class="dash-header"><h4>Conformit\u00e0 ambientale</h4><select class="dash-reg-select" onchange="currentRegulation=this.value;if(window._lastClickedProps)document.getElementById('complianceContent').innerHTML=renderSemaphore(window._lastClickedProps);">`;
+  for(const[k,r] of Object.entries(REGULATIONS)) h+=`<option value="${k}"${k===currentRegulation?" selected":""}>${r.name}</option>`;
+  h+=`</select></div><div class="dash-summary">`;
+  if(c.green) h+=`<div class="dash-summary-item"><div class="dash-light green"></div><span class="dash-summary-count">${c.green}</span> OK</div>`;
+  if(c.yellow) h+=`<div class="dash-summary-item"><div class="dash-light yellow"></div><span class="dash-summary-count">${c.yellow}</span> Att.</div>`;
+  if(c.red) h+=`<div class="dash-summary-item"><div class="dash-light red"></div><span class="dash-summary-count">${c.red}</span> Fuori</div>`;
+  if(c.gray) h+=`<div class="dash-summary-item"><div class="dash-light gray"></div><span class="dash-summary-count">${c.gray}</span> N/D</div>`;
+  h+=`</div><div class="dash-card">`;
+  for(const r of results) h+=`<div class="dash-row"><div class="dash-light ${r.status}"></div><span class="dash-param">${r.th.label}</span><span class="dash-value">${r.displayVal}</span><span class="dash-limit">${r.th[r.status]?r.th[r.status].label:""}</span></div>`;
+  h+=`</div><div class="dash-note">${reg.description}</div>`; return h;
+}
+
+// === MAP ===
+const map = L.map("map").setView([45.732, 13.198], 16);
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:25,maxNativeZoom:18,attribution:"Tiles &copy; Esri"}).addTo(map);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{minZoom:18,maxZoom:25,attribution:"&copy; OSM"}).addTo(map);
+const wmsRef = L.tileLayer.wms(WMS_URL,{layers:CURRENT_TYPE_NAME,styles:"",format:"image/png",transparent:true,version:"1.1.0",srs:"EPSG:4326"}).addTo(map);
+const SOLVE_GEE_OWS = "https://solve.corila.it/geoserver/geonode/data_model_gee_best_practive_d1vg8vw/ows";
+const solveGeeLayer = L.tileLayer.wms(SOLVE_GEE_OWS,{layers:"geonode:data_model_gee_best_practive_d1vg8vw",styles:"",format:"image/png",transparent:true,version:"1.1.1",srs:"EPSG:4326"}).addTo(map);
+
+// === SID MSP LAYERS ===
+function addSIDLayer(n,t){if(activeSIDLayers[n])return;activeSIDLayers[n]=L.tileLayer.wms(SID_WMS_URL,{layers:n,styles:"",format:"image/png",transparent:true,version:"1.1.1",srs:"EPSG:4326"}).addTo(map);}
+function removeSIDLayer(n){if(activeSIDLayers[n]){map.removeLayer(activeSIDLayers[n]);delete activeSIDLayers[n];}}
+function toggleSIDLayer(n,t,c){if(c)addSIDLayer(n,t);else removeSIDLayer(n);}
+
+async function discoverSIDLayers(){
+  const btn=document.getElementById('discoverBtn'),st=document.getElementById('mspDiscoverStatus');
+  btn.disabled=true; btn.textContent='\u23F3 Caricamento...'; st.textContent='Scaricamento GetCapabilities dal SID...';
+  try{
+    const res=await fetch(SID_WMS_URL+'?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities');
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const txt=await res.text();
+    const xml=new DOMParser().parseFromString(txt,"text/xml");
+    const layers=[];
+    xml.querySelectorAll('Layer').forEach(el=>{
+      const ne=el.querySelector(':scope > Name'), te=el.querySelector(':scope > Title');
+      if(ne&&ne.textContent) layers.push({name:ne.textContent.trim(),title:te?te.textContent.trim():ne.textContent.trim()});
+    });
+    discoveredSIDLayers=layers; st.textContent='Trovati '+layers.length+' layer.';
+    renderMSPLayerList(layers);
+  }catch(e){
+    console.error('SID GetCap error:',e);
+    st.innerHTML='CORS o rete: '+escapeHtml(e.message)+'.<br><span style="font-size:10px;">Il server SID potrebbe bloccare CORS per GetCapabilities. Puoi aggiungere layer manualmente.</span>';
+    renderManualMSPInput();
+  }
+  btn.disabled=false; btn.textContent='\uD83D\uDD0D Scopri layer dal SID';
+}
+
+function renderMSPLayerList(layers){
+  const c=document.getElementById('mspLayerList');
+  if(!layers.length){c.innerHTML='<div class="msp-status">Nessun layer trovato.</div>';return;}
+  let h='<div style="max-height:200px;overflow-y:auto;">';
+  for(const l of layers){const id='msp_'+l.name.replace(/[^a-zA-Z0-9_]/g,'_');
+    h+=`<div class="msp-layer-item"><input type="checkbox" id="${id}" onchange="toggleSIDLayer('${l.name.replace(/'/g,"\\'")}','${(l.title||l.name).replace(/'/g,"\\'")}',this.checked)"/><label for="${id}">${escapeHtml(l.title||l.name)}</label><span class="msp-badge sid">SID</span></div>`;}
+  h+='</div>'; c.innerHTML=h;
+}
+function renderManualMSPInput(){
+  document.getElementById('mspLayerList').innerHTML=`<div style="margin-top:6px;"><input type="text" id="manualLayerName" class="search" placeholder="Nome layer (es: mappa_09_benicultdichiarati)" style="margin-bottom:4px;"/><button class="msp-discover-btn" onclick="addManualLayer()" style="background:#2a7;">+ Aggiungi</button></div><div id="manualLayerList" style="margin-top:8px;"></div>`;
+}
+function addManualLayer(){
+  const inp=document.getElementById('manualLayerName'),n=inp.value.trim();if(!n)return;inp.value='';
+  const id='msp_m_'+n.replace(/[^a-zA-Z0-9_]/g,'_'),div=document.createElement('div');div.className='msp-layer-item';
+  div.innerHTML=`<input type="checkbox" id="${id}" checked onchange="toggleSIDLayer('${n.replace(/'/g,"\\'")}','${n.replace(/'/g,"\\'")}',this.checked)"/><label for="${id}">${escapeHtml(n)}</label><span class="msp-badge sid">SID</span>`;
+  document.getElementById('manualLayerList').appendChild(div); addSIDLayer(n,n);
+}
+
+// === WFS ===
+async function fetchWFS(){const u=new URL(OWS_URL);u.searchParams.set("service","WFS");u.searchParams.set("version","2.0.0");u.searchParams.set("request","GetFeature");u.searchParams.set("typeNames",CURRENT_TYPE_NAME);u.searchParams.set("outputFormat","application/json");u.searchParams.set("srsName","EPSG:4326");const r=await fetch(u.toString());if(!r.ok)throw new Error('WFS '+r.status);return r.json();}
+
+// === STYLING ===
+function pickNonNull(v){return v.filter(x=>x!==null&&x!==undefined&&x!=="");}
+function isNumericAttr(v){const a=pickNonNull(v);if(!a.length)return false;let ok=0;for(const x of a.slice(0,2000)){const n=(typeof x==="number")?x:Number(String(x).replace(",","."));if(Number.isFinite(n))ok++;}return ok/Math.min(a.length,2000)>=0.8;}
+function quantile(s,q){const p=(s.length-1)*q,b=Math.floor(p),r=p-b;return s[b+1]===undefined?s[b]:s[b]+r*(s[b+1]-s[b]);}
+function makeQuantileBreaks(n,k=5){const s=[...n].sort((a,b)=>a-b),br=[];for(let i=1;i<k;i++)br.push(quantile(s,i/k));return br;}
+const CAT_COLORS=["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf"];
+function geometryKind(f){const t=f.geometry?.type||"";return t.includes("Line")?"line":t.includes("Point")?"point":t.includes("Polygon")?"poly":"other";}
+function styleFeatureFactory(th){return function(f){const k=geometryKind(f),b={weight:3,opacity:1},v=th?.attr?f.properties?.[th.attr]:null,c=th?.getColor?th.getColor(v):"#3388ff";if(k==="line")return{...b,color:c};if(k==="poly")return{...b,color:c,fillColor:c,fillOpacity:0.35};return{...b,color:c};};}
+function pointToLayerFactory(th){return function(f,ll){const v=th?.attr?f.properties?.[th.attr]:null,c=th?.getColor?th.getColor(v):"#3388ff";return L.circleMarker(ll,{radius:5,weight:1.5,color:"#333",fillColor:c,fillOpacity:0.85});};}
+
+// === TOC & LEGEND ===
+function renderTOC(a){const ul=document.getElementById("attrList");ul.innerHTML="";for(const l of a){const li=document.createElement("li"),btn=document.createElement("button");btn.className="attr-btn";btn.textContent=l;btn.addEventListener("click",()=>selectAttribute(l));li.appendChild(btn);ul.appendChild(li);}}
+function setLegendNone(){document.getElementById("legend").innerHTML='<span class="hint">Seleziona un attributo.</span>';document.getElementById("mode").textContent="\u2014";}
+function setLegendNumeric(l,br,pal){let h=`<b>${escapeHtml(l)}</b> (quantili)<br>`;for(let i=0;i<=br.length;i++){const lo=i===0?"min":br[i-1].toFixed(2),hi=i===br.length?"max":br[i].toFixed(2);h+=`<div class="legend-row"><div class="swatch" style="background:${pal[i]}"></div>${lo} \u2013 ${hi}</div>`;}document.getElementById("legend").innerHTML=h;}
+function setLegendCategorical(l,cm){let h=`<b>${escapeHtml(l)}</b><br>`;cm.forEach((v,k)=>{h+=`<div class="legend-row"><div class="swatch" style="background:${v.color}"></div>${escapeHtml(k)} (${v.count})</div>`;});document.getElementById("legend").innerHTML=h;}
+function selectAttribute(label){const fn=ATTR_FIELD_MAP[label]||label;document.querySelectorAll(".attr-btn").forEach(b=>b.classList.remove("active"));document.querySelectorAll(".attr-btn").forEach(b=>{if(b.textContent===label)b.classList.add("active");});const f=geojsonData?.features||[];if(!f.length)return;const v=f.map(x=>x.properties?.[fn]);if(isNumericAttr(v))applyNumeric(label,fn,v);else applyCategorical(label,fn,v);}
+const NUM_PALETTE=["#2166ac","#67a9cf","#fddbc7","#ef8a62","#b2182b"];
+function applyNumeric(lbl,fn,rv){const nums=rv.map(v=>(typeof v==="number")?v:Number(String(v).replace(",","."))).filter(n=>Number.isFinite(n));if(!nums.length)return;const br=makeQuantileBreaks(nums,NUM_PALETTE.length);const gc=v=>{const n=(typeof v==="number")?v:Number(String(v).replace(",","."));if(!Number.isFinite(n))return"#ccc";for(let i=0;i<br.length;i++)if(n<br[i])return NUM_PALETTE[i];return NUM_PALETTE[NUM_PALETTE.length-1];};document.getElementById("mode").textContent="Numerico (quantili)";applyVectorLayer({mode:"numeric",attr:fn,breaks:br,getColor:gc});setLegendNumeric(lbl,br,NUM_PALETTE);}
+function applyCategorical(lbl,fn,rv){const cm=new Map();for(const v of rv){const k=(v===null||v===undefined||v==="")?null:String(v);if(k===null)continue;cm.set(k,(cm.get(k)||0)+1);}const sorted=[...cm.entries()].sort((a,b)=>b[1]-a[1]);const cats=new Map();sorted.forEach(([k,c],i)=>cats.set(k,{color:CAT_COLORS[i%CAT_COLORS.length],count:c}));document.getElementById("mode").textContent="Categorico";applyVectorLayer({mode:"categorical",attr:fn,categoriesMap:cats,getColor:v=>{const k=(v===null||v===undefined||v==="")?null:String(v);return k===null?"#bbb":cats.get(k)?.color||"#bbb";}});setLegendCategorical(lbl,cats);}
+
+function applyVectorLayer(th){
+  if(vectorLayer)map.removeLayer(vectorLayer);
+  vectorLayer=L.geoJSON(geojsonData,{style:styleFeatureFactory(th),pointToLayer:pointToLayerFactory(th),
+    onEachFeature:(f,l)=>{l.on("click",e=>{map._vectorFeatureClicked=true;setTimeout(()=>{map._vectorFeatureClicked=false;},50);handleFeatureClick(f.properties,e.latlng,th);});}
+  }).addTo(map);
+  const b=vectorLayer.getBounds();if(b&&typeof b.isValid==="function"&&b.isValid())map.fitBounds(b);
+}
+
+// === CLICK HANDLER ===
+function handleFeatureClick(props,latlng,theming){
+  window._lastClickedProps=props; window._lastClickedLatlng=latlng;
+  // Tab Info
+  const gc=document.getElementById("gfiContent"); let h="";
+  if(latlng)h+=`<div class="gfi-coords">Lat: ${latlng.lat.toFixed(6)}, Lng: ${latlng.lng.toFixed(6)}</div>`;
+  h+=`<div class="gfi-section"><div class="gfi-section-header" style="background:rgba(34,170,119,0.08);color:#2a7;"><span class="dot" style="background:#2a7;"></span>${CURRENT_TYPE_NAME}</div>`;
+  const ent=Object.entries(props).filter(([k,v])=>v!==null&&v!==undefined&&v!=="");
+  if(!ent.length){h+=`<div class="gfi-feature-card"><div class="gfi-empty">Feature senza attributi</div></div>`;}
+  else{h+=`<div class="gfi-feature-card">`;if(theming&&theming.attr){h+=`<div class="gfi-attr-row" style="background:#f0faf5;"><span class="gfi-attr-key" style="color:#2a7;font-weight:700;">${escapeHtml(theming.attr)}</span><span class="gfi-attr-val" style="font-weight:600;">${escapeHtml(String(props[theming.attr]!=null?props[theming.attr]:""))}</span></div>`;}
+  for(const[k,v] of ent){if(theming&&theming.attr&&k===theming.attr)continue;const val=String(v),nv=Number(val);h+=`<div class="gfi-attr-row"><span class="gfi-attr-key">${escapeHtml(k)}</span><span class="gfi-attr-val">${(Number.isFinite(nv)&&val.includes("."))?nv.toLocaleString("it-IT",{maximumFractionDigits:6}):escapeHtml(val)}</span></div>`;}
+  h+=`</div>`;}
+  h+=`</div>`; gc.innerHTML=h;
+  // Tab Compliance
+  document.getElementById("complianceContent").innerHTML=renderSemaphore(props);
+  // Tab AI
+  updateAIContext(props,latlng);
+  // Marker
+  if(window._gfiMarker)map.removeLayer(window._gfiMarker);
+  window._gfiMarker=L.circleMarker(latlng,{radius:6,weight:2,color:"#c33",fillColor:"#ff6666",fillOpacity:0.7}).addTo(map);
+  // Query SID
+  querySIDForMSP(latlng);
+}
+
+async function querySIDForMSP(latlng){
+  const names=Object.keys(activeSIDLayers); if(!names.length){window._lastMSPInfo=null;return;}
+  const allN=names.join(','), p=buildGFIParams(allN,latlng,SID_WMS_URL,'1.1.1');
+  // Try JSON first
+  try{p.info_format='application/json';const u=buildGFIUrl(SID_WMS_URL,p),r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json(),f=d.features||[];window._lastMSPInfo=f;if(f.length>0){document.getElementById("gfiContent").innerHTML+='<hr style="margin:8px 0;border:none;border-top:1px solid #0369a1;">'+renderFeatureProps(f,'#0369a1','\uD83C\uDF0A PSM Zone (SID)','<span class="method-tag method-fetch">fetch</span>');updateAIContext(window._lastClickedProps,latlng);}return;}catch(e){console.log('SID GFI fetch failed:',e.message);}
+  // Iframe fallback
+  p.info_format='text/html';const hu=buildGFIUrl(SID_WMS_URL,p);
+  document.getElementById("gfiContent").innerHTML+=`<hr style="margin:8px 0;border:none;border-top:1px solid #0369a1;"><div class="gfi-section"><div class="gfi-section-header" style="background:rgba(3,105,161,0.08);color:#0369a1;"><span class="dot" style="background:#0369a1;"></span>\uD83C\uDF0A PSM Zone (SID) <span class="method-tag method-fail">iframe</span></div><div class="gfi-feature-card" style="padding:0;"><iframe style="width:100%;border:1px solid #ddd;border-radius:4px;min-height:180px;background:#fff;" src="${hu}"></iframe></div><div style="padding:4px 10px;"><a href="${hu}" target="_blank" style="color:#06c;font-size:11px;">Apri in nuova tab</a></div></div>`;
+}
+
+// === AI ANALYSIS ===
+function updateAIContext(props,latlng){
+  const ac=document.getElementById("aiContent"); if(!props){ac.innerHTML='<div class="ai-placeholder">Seleziona un punto sulla traiettoria.</div>';return;}
+  const reg=REGULATIONS[currentRegulation],sr=[];
+  if(reg)for(const[f,th] of Object.entries(reg.params)){const v=props[f],s=evaluateParam(v,th);sr.push({param:th.label,value:v,status:s,unit:th.unit});}
+  const mi=window._lastMSPInfo;let mt="Nessun layer PSM attivo o nessuna zona identificata.";
+  if(mi&&mi.length>0) mt=mi.map(f=>{const p=f.properties||{};return Object.entries(p).map(([k,v])=>k+": "+v).join(', ');}).join(' | ');
+  let h=`<div class="ai-context-summary"><strong>Coordinate:</strong> ${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}<br><strong>Layer:</strong> ${CURRENT_TYPE_NAME}<br><strong>Normativa:</strong> ${reg?reg.name:'N/D'}<br><strong>Parametri:</strong><br>`;
+  sr.forEach(r=>{const ic=r.status==='green'?'\uD83D\uDFE2':r.status==='yellow'?'\uD83D\uDFE1':r.status==='red'?'\uD83D\uDD34':'\u26AA';const vl=(r.value!==null&&r.value!==undefined)?r.value+(r.unit?' '+r.unit:''):'N/D';h+=ic+' '+r.param+': '+vl+'<br>';});
+  h+=`<strong>Zona PSM:</strong> ${escapeHtml(mt)}</div>`;
+  h+=`<button class="ai-btn ai-btn-primary" onclick="runAIAnalysis()" id="aiRunBtn">\uD83E\uDD16 Genera Analisi di Compatibilit\u00e0</button><div id="aiResponseContainer"></div>`;
+  ac.innerHTML=h;
+}
+
+async function runAIAnalysis(){
+  const btn=document.getElementById('aiRunBtn'),cnt=document.getElementById('aiResponseContainer');
+  if(!window._lastClickedProps)return;
+  btn.disabled=true; btn.innerHTML='<span class="ai-spinner"></span> Analisi in corso...';
+  cnt.innerHTML='<div style="text-align:center;padding:20px;color:#666;">Claude sta analizzando i dati...</div>';
+  const props=window._lastClickedProps,ll=window._lastClickedLatlng,reg=REGULATIONS[currentRegulation];
+  let env="";
+  if(reg)for(const[f,th] of Object.entries(reg.params)){const v=props[f],s=evaluateParam(v,th),sl={green:"CONFORME",yellow:"ATTENZIONE",red:"FUORI NORMA",gray:"N/D"}[s];env+="- "+th.label+": "+(v!==null&&v!==undefined?v+" "+th.unit:"N/D")+" -> "+sl+" (limite: "+th.green.label+")\n";}
+  let msp="Nessuna zona PSM identificata.";
+  if(window._lastMSPInfo&&window._lastMSPInfo.length>0) msp=window._lastMSPInfo.map(f=>{const p=f.properties||{};return Object.entries(p).map(([k,v])=>k+": "+v).join(', ');}).join('\n');
+  const prompt=`Sei un esperto di pianificazione dello spazio marittimo italiano e normativa ambientale marina.\n\nAnalizza questo punto di monitoraggio:\n\nCOORDINATE: ${ll.lat.toFixed(6)}N, ${ll.lng.toFixed(6)}E\nLAYER: ${CURRENT_TYPE_NAME}\n\nPARAMETRI AMBIENTALI (${reg?reg.name:'N/D'}):\n${env}\nZONA PSM:\n${msp}\n\nFornisci:\n1. Stato ambientale complessivo\n2. Criticit\u00e0 rispetto alla normativa\n3. Compatibilit\u00e0 con destinazione d'uso PSM (se dati disponibili)\n4. Raccomandazioni operative\n5. Necessit\u00e0 di ulteriori indagini\n\nRispondi in italiano, max 300 parole, linguaggio tecnico.`;
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+    const d=await r.json(), txt=d.content?.map(i=>i.type==="text"?i.text:"").filter(Boolean).join("\n")||"Nessuna risposta.";
+    cnt.innerHTML=`<div class="ai-response"><h4>\uD83E\uDD16 Report Compatibilit\u00e0 Ambientale-PSM</h4>${escapeHtml(txt).replace(/\n/g,'<br>')}</div><div style="font-size:10px;color:#999;margin-top:6px;text-align:right;">Claude Sonnet \u00b7 ${new Date().toLocaleString('it-IT')}</div>`;
+  }catch(e){
+    cnt.innerHTML=`<div class="ai-response" style="border-color:#fca5a5;background:#fef2f2;"><h4 style="color:#dc2626;">Errore AI</h4>${escapeHtml(e.message)}<br><br><span style="font-size:11px;">L'API Anthropic richiede autenticazione. Per il prototipo completo, usare come artifact React o con API key propria.</span></div>`;
+  }
+  btn.disabled=false; btn.innerHTML='\uD83E\uDD16 Genera Analisi di Compatibilit\u00e0';
+}
+
+// === GFI UTILS ===
+function logDebug(l,u,n,b,e){const lg=document.getElementById("debugLog");if(lg.querySelector(".hint"))lg.innerHTML="";const d=document.createElement("div");d.className="debug-entry";let bh="";if(b!==null&&b!==undefined){const bs=typeof b==="string"?b:JSON.stringify(b,null,2);bh=`<div class="debug-body">${escapeHtml(bs.length>1500?bs.substring(0,1500)+"\n...":bs)}</div>`;}d.innerHTML=`<div class="debug-label">${l}</div><div class="debug-url"><a href="${u}" target="_blank">Apri</a> \u2014 ${escapeHtml(u)}</div><div class="debug-status ${e?'err':'ok'}">${n}</div>${bh}`;lg.prepend(d);}
+
+function buildGFIParams(ln,ll,wb,ver){
+  const pt=map.latLngToContainerPoint(ll),sz=map.getSize(),bd=map.getBounds(),v=ver||"1.1.1",is13=v.startsWith("1.3");
+  const p={service:"WMS",request:"GetFeatureInfo",version:v,styles:"",format:"image/png",transparent:"true",feature_count:"10",width:String(sz.x),height:String(sz.y),layers:ln,query_layers:ln};
+  if(is13){p.crs="EPSG:4326";p.i=String(Math.round(pt.x));p.j=String(Math.round(pt.y));p.bbox=[bd.getSouth(),bd.getWest(),bd.getNorth(),bd.getEast()].join(",");}
+  else{p.srs="EPSG:4326";p.x=String(Math.round(pt.x));p.y=String(Math.round(pt.y));p.bbox=[bd.getWest(),bd.getSouth(),bd.getEast(),bd.getNorth()].join(",");}
+  return p;
+}
+function buildGFIUrl(b,p){const u=new URL(b);for(const[k,v] of Object.entries(p))u.searchParams.set(k,v);return u.toString();}
+function renderFeatureProps(feats,col,lbl,tag){
+  if(!feats||!feats.length)return`<div class="gfi-section"><div class="gfi-section-header" style="background:${col}15;color:${col};"><span class="dot" style="background:${col};"></span>${lbl} ${tag||""}</div><div class="gfi-feature-card"><div class="gfi-empty">Nessun dato</div></div></div>`;
+  let h=`<div class="gfi-section"><div class="gfi-section-header" style="background:${col}15;color:${col};"><span class="dot" style="background:${col};"></span>${lbl} ${tag||""}`;
+  if(feats.length>1)h+=` <span style="font-weight:400;font-size:11px;color:#888;">(${feats.length})</span>`;
+  h+=`</div>`;
+  for(const f of feats){const p=f.properties||{},e=Object.entries(p).filter(([k,v])=>v!==null&&v!==undefined&&v!=="");if(!e.length){h+=`<div class="gfi-feature-card"><div class="gfi-empty">Feature vuota</div></div>`;continue;}h+=`<div class="gfi-feature-card">`;for(const[k,v] of e){const vs=String(v),nv=Number(vs);h+=`<div class="gfi-attr-row"><span class="gfi-attr-key">${escapeHtml(k)}</span><span class="gfi-attr-val">${(Number.isFinite(nv)&&vs.includes("."))?nv.toLocaleString("it-IT",{maximumFractionDigits:6}):escapeHtml(vs)}</span></div>`;}h+=`</div>`;}
+  return h+`</div>`;
+}
+
+// === MAP CLICK (non-vector) ===
+map.on("click",async e=>{
+  if(map._vectorFeatureClicked)return;
+  const al=[];if(map.hasLayer(solveGeeLayer))al.push({name:"gee_best_practive (solve)",layer:"geonode:data_model_gee_best_practive_d1vg8vw",wms:SOLVE_GEE_OWS,color:"#e67e22"});
+  const sidN=Object.keys(activeSIDLayers);
+  if(!al.length&&!sidN.length)return;
+  queryCounter++;const qid=queryCounter;
+  const gc=document.getElementById("gfiContent");
+  gc.innerHTML=`<div class="gfi-coords">Lat: ${e.latlng.lat.toFixed(6)}, Lng: ${e.latlng.lng.toFixed(6)}</div><div class="gfi-loading">Interrogazione...</div>`;
+  const parts=[];
+  for(const l of al){const p=buildGFIParams(l.layer,e.latlng,l.wms);p.info_format="application/json";const u=buildGFIUrl(l.wms,p);
+    try{const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json(),f=d.features||[];logDebug(`[#${qid}] ${l.name}`,u,`OK ${f.length}`,d,false);parts.push(renderFeatureProps(f,l.color,l.name,'<span class="method-tag method-fetch">fetch</span>'));}
+    catch(ex){logDebug(`[#${qid}] ${l.name}`,u,ex.message,null,true);const hp={...p,info_format:"text/html"};const hu=buildGFIUrl(l.wms,hp);parts.push(`<div class="gfi-section"><div class="gfi-section-header" style="background:${l.color}15;color:${l.color};"><span class="dot" style="background:${l.color};"></span>${l.name} <span class="method-tag method-fail">iframe</span></div><div class="gfi-feature-card" style="padding:0;"><iframe style="width:100%;border:1px solid #ddd;border-radius:4px;min-height:180px;background:#fff;" src="${hu}"></iframe></div></div>`);}
+  }
+  if(sidN.length>0){const an=sidN.join(','),sp=buildGFIParams(an,e.latlng,SID_WMS_URL,'1.1.1');sp.info_format='text/html';const su=buildGFIUrl(SID_WMS_URL,sp);
+    parts.push(`<div class="gfi-section"><div class="gfi-section-header" style="background:rgba(3,105,161,0.08);color:#0369a1;"><span class="dot" style="background:#0369a1;"></span>\uD83C\uDF0A PSM (SID) <span class="method-tag method-fail">iframe</span></div><div class="gfi-feature-card" style="padding:0;"><iframe style="width:100%;border:1px solid #ddd;border-radius:4px;min-height:180px;background:#fff;" src="${su}"></iframe></div><div style="padding:4px 10px;"><a href="${su}" target="_blank" style="color:#06c;font-size:11px;">Apri in nuova tab</a></div></div>`);
+  }
+  gc.innerHTML=parts.length?`<div class="gfi-coords">Lat: ${e.latlng.lat.toFixed(6)}, Lng: ${e.latlng.lng.toFixed(6)}</div>`+parts.join('<hr style="margin:8px 0;border:none;border-top:1px solid #ddd;">'):'<div class="gfi-placeholder">Nessun layer attivo.</div>';
+  if(window._gfiMarker)map.removeLayer(window._gfiMarker);
+  window._gfiMarker=L.circleMarker(e.latlng,{radius:6,weight:2,color:"#c33",fillColor:"#ff6666",fillOpacity:0.7}).addTo(map);
+});
+
+// === FILTER & TOGGLE ===
+document.getElementById("search").addEventListener("input",e=>{const q=e.target.value.trim().toLowerCase();document.querySelectorAll("#attrList .attr-btn").forEach(b=>{b.parentElement.style.display=b.textContent.toLowerCase().includes(q)?"":"none";});});
+document.getElementById("toggleSolveGeeLayer").addEventListener("change",e=>{if(e.target.checked)solveGeeLayer.addTo(map);else map.removeLayer(solveGeeLayer);});
+
+// === LAYER SELECTOR ===
+function setupLayerSelector(){const s=document.getElementById("layerSelect");for(const[l,t] of Object.entries(AVAILABLE_LAYERS)){const o=document.createElement("option");o.value=t;o.textContent=l;s.appendChild(o);}s.value=CURRENT_TYPE_NAME;
+  s.addEventListener("change",async e=>{CURRENT_TYPE_NAME=e.target.value;document.getElementById("layerName").textContent=CURRENT_TYPE_NAME;wmsRef.setParams({layers:CURRENT_TYPE_NAME});if(vectorLayer)map.removeLayer(vectorLayer);geojsonData=await fetchWFS();const f=geojsonData.features||[];document.getElementById("count").textContent=String(f.length);setLegendNone();if(f.length>0)applyVectorLayer({mode:"none",attr:null,getColor:()=>"#3388ff"});});}
+
+// === INIT ===
+async function init(){
+  try{setupLayerSelector();document.getElementById("layerName").textContent=CURRENT_TYPE_NAME;geojsonData=await fetchWFS();const f=geojsonData.features||[];document.getElementById("count").textContent=String(f.length);renderTOC(TOC_ATTRS);setLegendNone();if(f.length>0)applyVectorLayer({mode:"none",attr:null,getColor:()=>"#3388ff"});}
+  catch(e){document.getElementById("note").textContent="Errore WFS. Controlla console.";console.error(e);}
+}
+init();
+</script>
+</body>
+</html>
