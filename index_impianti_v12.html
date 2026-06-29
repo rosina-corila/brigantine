@@ -916,66 +916,50 @@ loadPotenzaStats();
 // ---------------------------
     // GetFeatureInfo (JSON + fallback HTML)
     // ---------------------------
-    function buildGFIUrl(latlng, layerName, infoFormat) {
-      const point = map.latLngToContainerPoint(latlng, map.getZoom());
-      const size = map.getSize();
-
-      // Query in EPSG:3857 (Leaflet default)
-      const bounds = map.getBounds();
-      const sw = map.options.crs.project(bounds.getSouthWest());
-      const ne = map.options.crs.project(bounds.getNorthEast());
-      const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
-
-      const params = {
-        service: "WMS",
-        version: "1.1.1",
-        request: "GetFeatureInfo",
-        layers: layerName,
-        query_layers: layerName,
-        styles: "",
-        bbox: bbox,
-        feature_count: 10,
-        height: size.y,
-        width: size.x,
-        format: "image/png",
-        info_format: infoFormat,
-        srs: "EPSG:3857",
-        CQL_FILTER: (__currentCql && __currentCql.trim().length) ? __currentCql : undefined,
-        x: Math.round(point.x),
-        y: Math.round(point.y)
-      };
-
-      const query = Object.keys(params)
-        .filter(k => params[k] !== undefined && params[k] !== null)
-        .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
-        .join("&");
-
-      return `${WMS_URL}?${query}`;
+   function buildGFIUrl(latlng, layerName, infoFormat) {
+    const point = map.latLngToContainerPoint(latlng, map.getZoom());
+    const size = map.getSize();
+  
+    // Query in EPSG:3857 (Leaflet default)
+    const bounds = map.getBounds();
+    const sw = map.options.crs.project(bounds.getSouthWest());
+    const ne = map.options.crs.project(bounds.getNorthEast());
+    const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
+  
+    const params = {
+      service: "WMS",
+      version: "1.1.1",
+      request: "GetFeatureInfo",
+      layers: layerName,
+      query_layers: layerName,
+      styles: "",
+      bbox: bbox,
+      feature_count: 20,
+      height: size.y,
+      width: size.x,
+      format: "image/png",
+      info_format: infoFormat,
+      srs: "EPSG:3857",
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+      // Rende più efficace il click sui layer areali/lineari in GeoServer
+      buffer: layerName === L_UP_EOLICO ? 10 : 5
+    };
+  
+    // Il CQL_FILTER della dashboard vale SOLO per geonode:impianti.
+    // Non va passato a geonode:up_eolico, perché contiene campi non presenti nel layer.
+    if (layerName === L_IMPIANTI && __currentCql && __currentCql.trim().length) {
+      params.CQL_FILTER = __currentCql;
     }
+  
+    const query = Object.keys(params)
+      .filter(k => params[k] !== undefined && params[k] !== null)
+      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
+      .join("&");
+  
+    return `${WMS_URL}?${query}`;
+  }
 
-    async function fetchGFI(latlng, layerName) {
-      // 1) JSON
-      try {
-        const r = await fetch(buildGFIUrl(latlng, layerName, "application/json"));
-        if (r.ok) {
-          const data = await r.json();
-          if (data && data.features && data.features.length) return { type: "json", data };
-        }
-      } catch(e) {}
-
-      // 2) HTML fallback
-      try {
-        const r = await fetch(buildGFIUrl(latlng, layerName, "text/html"));
-        if (r.ok) {
-          const html = await r.text();
-          if (html && html.trim().length > 0 && !html.toLowerCase().includes("no features")) {
-            return { type: "html", data: html };
-          }
-        }
-      } catch(e) {}
-
-      return null;
-    }
 
     // ---------------------------
     // Popup "TGS-like" card builder
