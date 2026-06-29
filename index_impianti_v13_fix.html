@@ -1,0 +1,1290 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GeoNode WMS – Impianti</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+
+    :root{
+      --panel-w: 420px;
+      --panel-w-mobile: 92vw;
+      --ease: cubic-bezier(.2,.8,.2,1);
+    }
+
+    html, body { height: 100%; margin: 0; }
+    body { position: relative; overflow: hidden; }
+
+    /* Map fills viewport; when panel is open (desktop) it makes room */
+    #map{
+      position: absolute;
+      inset: 0;
+      right: 0;
+      transition: right .25s var(--ease);
+    }
+    body.panel-open #map{
+      right: var(--panel-w);
+    }
+
+    /* Backdrop (mainly for mobile) */
+    .panel-backdrop{
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.22);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s var(--ease);
+      z-index: 8800;
+    }
+    body.panel-open .panel-backdrop{
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Side panel */
+    #infoPanel.panel{
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: var(--panel-w);
+      max-width: 46vw;
+      background: #fff;
+      border-left: 1px solid rgba(0,0,0,.10);
+      box-shadow: -14px 0 30px rgba(0,0,0,.14);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(0);
+      transition: transform .25s var(--ease);
+    }
+    #infoPanel.panel--closed{
+      transform: translateX(100%);
+    }
+
+    #infoPanel .panel__header{
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 14px;
+      background: linear-gradient(180deg, rgba(247,248,250,1) 0%, rgba(255,255,255,1) 100%);
+      border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+    #infoPanel .panel__title{
+      font-weight: 750;
+      letter-spacing: .2px;
+    }
+    #infoPanel .panel__close{
+      border: 1px solid rgba(0,0,0,.10);
+      background: rgba(255,255,255,.9);
+      border-radius: 999px;
+      font-size: 16px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 8px 10px;
+      transition: transform .12s var(--ease), background .12s var(--ease);
+    }
+    #infoPanel .panel__close:hover{ transform: scale(1.04); background: #fff; }
+
+    /* Content takes all remaining height */
+    #infoPanel .panel__content{
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    #infoPanel .panel__empty{
+      opacity: .7;
+      font-size: 13px;
+    }
+
+    /* Mobile: panel overlays map, map does NOT shrink */
+    @media (max-width: 820px){
+      body.panel-open #map{ right: 0; }
+      #infoPanel.panel{ width: var(--panel-w-mobile); max-width: var(--panel-w-mobile); }
+    }
+
+/* Left panel */
+    .legend {
+      position: absolute;
+      z-index: 9100;
+      top: 12px;
+      left: 12px;
+      background: rgba(255,255,255,0.96);
+      padding: 10px 12px;
+      border-radius: 12px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.16);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 320px;
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .legend h1 { font-size: 14px; margin: 0 0 8px 0; }
+    .legend h3 { font-size: 10px; margin: 0 0 8px 0; font-weight: normal; }
+    .proj { margin: 10px 0; }
+    .proj-title {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 650; margin-bottom: 6px;
+    }
+    .items { margin-left: 6px; }
+    .item { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+    .item small { opacity: .75; }
+    .hint { font-size: 12px; opacity: .8; margin-top: 8px; line-height: 1.25; }
+
+    /* Popup card styles (inspired by your screenshot) */
+    .wf-card {
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      width: 360px;
+      max-width: 90vw;
+    }
+    .wf-header {
+      position: relative;
+      padding: 14px 14px 10px 14px;
+      background: #f5f6fb;
+      border-radius: 14px 14px 0 0;
+      border: 1px solid rgba(0,0,0,.08);
+      border-bottom: none;
+    }
+    .wf-title {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: .2px;
+      color: #0b1b3a;
+      line-height: 1.15;
+      margin: 0;
+      padding-right: 44px;
+    }
+    .wf-icon {
+      width: 22px; height: 22px; margin-top: 2px; flex: 0 0 auto;
+    }
+    .wf-close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 34px; height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: rgba(255,255,255,.85);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .wf-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 10px 14px 14px 14px;
+      background: #f5f6fb;
+      border-left: 1px solid rgba(0,0,0,.08);
+      border-right: 1px solid rgba(0,0,0,.08);
+      border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+    .wf-metric {
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(255,255,255,.8);
+      border: 1px solid rgba(0,0,0,.08);
+      min-height: 52px;
+    }
+    .wf-metric .k {
+      font-size: 11px;
+      color: rgba(11,27,58,.7);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      font-weight: 650;
+      text-transform: none;
+    }
+    .wf-metric .v {
+      font-size: 13px;
+      font-weight: 750;
+      color: #0b1b3a;
+      word-break: break-word;
+    }
+    .wf-body {
+      border: 1px solid rgba(0,0,0,.08);
+      border-top: none;
+      border-radius: 0 0 14px 14px;
+      background: #ffffff;
+      padding: 12px 14px 14px 14px;
+      max-height: 320px;
+      overflow: auto;
+    }
+
+    /* When the card is rendered inside the right side panel, it should use
+       the full column height (no inner scrollbar). The panel itself will scroll. */
+    #panelContent .wf-card{
+      width: 100%;
+      max-width: none;
+    }
+    #panelContent .wf-body{
+      max-height: none;
+      overflow: visible;
+    }
+    .wf-section {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(0,0,0,.08);
+    }
+    .wf-section:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    .wf-h2 {
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      font-weight: 850;
+      color: #0b1b3a;
+    }
+    .wf-kv {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .wf-row {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .wf-row .k {
+      color: rgba(11,27,58,.65);
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .wf-row .v {
+      color: #0b1b3a;
+      font-weight: normal;
+      word-break: break-word;
+    }
+
+    .wf-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .wf-nav .pill {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: #0b1b3a;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .wf-nav button {
+      width: 34px; height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: #0b1b3a;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+    .wf-note {
+      font-size: 12px;
+      color: rgba(11,27,58,.65);
+      margin-top: 8px;
+      line-height: 1.2;
+    }
+
+    /* Leaflet popup tweaks */
+    .leaflet-popup-content { margin: 10px 10px; }
+    .leaflet-popup-content-wrapper { border-radius: 16px; }
+  
+    /* Filter UI */
+    .filter-block{
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(0,0,0,.08);
+    }
+    .filter-label{
+      display:block;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #0b1b3a;
+    }
+    .filter-select{
+      width: 100%;
+      padding: 10px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .filter-select:focus{
+      border-color: rgba(11,27,58,.45);
+      box-shadow: 0 0 0 3px rgba(11,27,58,.10);
+    }
+    .filter-note{
+      margin-top: 6px;
+      font-size: 11px;
+      opacity: .75;
+      line-height: 1.25;
+    }
+
+    /* Legend scala potenza */
+    .legend-scale{
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(0,0,0,.08);
+    }
+    .legend-scale-title{
+      font-size: 12px;
+      font-weight: 700;
+      color: #0b1b3a;
+      margin-bottom: 6px;
+    }
+    .legend-scale-items{
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+    }
+    .legend-scale-item{
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-scale-swatch{
+      width: 18px;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+    }
+
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="panelBackdrop" class="panel-backdrop" aria-hidden="true"></div>
+
+  <aside id="infoPanel" class="panel panel--closed" aria-label="Dettagli elemento">
+    <div class="panel__header">
+      <div class="panel__title">Dettagli</div>
+      <button id="panelClose" class="panel__close" type="button" aria-label="Chiudi">✕</button>
+    </div>
+    <div id="panelContent" class="panel__content">
+      <div class="panel__empty">Clicca un elemento sulla mappa per vedere i dettagli.</div>
+    </div>
+  </aside>
+
+  <div class="legend">
+    <h1>Ricognizione Impianti eolici off-shore (WMS)</h1>
+    <h3>Istanze presenti all'interno del sito MASE al 19/02/2026</h3>
+
+    <div class="proj">
+      <div class="proj-title">
+        <span>Impianti</span>
+      </div>
+      <div class="items">
+        <label class="item">
+          <input type="checkbox" id="chk_impianti" checked />
+          <span>Layer <small>(geonode:impianti)</small></span>
+        </label>
+      </div>
+      <div class="hint">Clic sulla mappa per interrogare gli oggetti (GetFeatureInfo) del layer attivo.</div>
+
+      <div class="filter-block" id="filterBlock">
+        <label class="filter-label" for="filter_proponente">Filtro Proponente</label>
+        <select id="filter_proponente" class="filter-select">
+          <option value="">Tutti i proponenti</option>
+        </select>
+        <div class="filter-note" id="filterNoteProponente">
+          Il menù viene popolato leggendo i valori univoci del campo <b>proponente</b> (via WFS). Se il WFS non è disponibile, la lista potrebbe rimanere vuota.
+        </div>
+      </div>
+
+      <div class="filter-block" id="filterBlockStato">
+        <label class="filter-label" for="filter_stato_ist">Filtro Stato procedura</label>
+        <select id="filter_stato_ist" class="filter-select">
+          <option value="">Tutti gli stati procedurali</option>
+        </select>
+        <div class="filter-note" id="filterNoteStato">
+          Il menù viene popolato leggendo i valori univoci del campo <b>stato_ist</b> (via WFS). Se il WFS non è disponibile, la lista potrebbe rimanere vuota.
+        </div>
+      </div>
+
+      <div class="legend-scale" id="legendPotenza">
+        <div class="legend-scale-title">Potenza installata (MW)</div>
+        <div class="legend-scale-items">
+          <div style="font-size: 11px; opacity: .75;">Calcolo intervalli in corso…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="proj" style="border-top:1px solid rgba(0,0,0,.08);padding-top:10px;">
+      <div class="proj-title">
+        <span>Aree idonee</span>
+      </div>
+      <div class="items">
+        <label class="item">
+          <input type="checkbox" id="chk_up_eolico" checked />
+          <span>Layer <small>(geonode:up_eolico)</small></span>
+        </label>
+      </div>
+      <div class="hint">Zone idonee all'installazione di impianti eolici off-shore.</div>
+      <div class="legend-scale" style="margin-top:8px;">
+        <div class="legend-scale-items">
+          <div class="legend-scale-item">
+            <span class="legend-scale-swatch" style="background:rgba(34,197,94,0.45);border:1.5px solid #16a34a;"></span>
+            <span style="font-size:11px;">Aree idonee</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="proj" style="border-top:1px solid rgba(0,0,0,.08);padding-top:10px;">
+      <div class="proj-title">
+        <span>Porti</span>
+      </div>
+      <div class="items">
+        <label class="item">
+          <input type="checkbox" id="chk_porti" checked />
+          <span>Layer <small>(geonode:porti_unione)</small></span>
+        </label>
+      </div>
+      <div class="hint">Porti di riferimento per la logistica degli impianti.</div>
+      <div class="legend-scale" style="margin-top:8px;">
+        <div class="legend-scale-items">
+          <div class="legend-scale-item">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 15 15" style="flex:0 0 auto;">
+              <path d="M7.5,0C5.5,0,4,1.567,4,3.5c0.0024,1.5629,1.0397,2.902,2.5,3.3379v6.0391c-0.9305-0.1647-1.8755-0.5496-2.6484-1.2695C2.7992,10.6273,2.002,9.0676,2.002,6.498c0.0077-0.5646-0.4531-1.0236-1.0176-1.0137C0.4329,5.493-0.0076,5.9465,0,6.498c0,3.0029,1.0119,5.1955,2.4902,6.5723C3.9685,14.4471,5.8379,15,7.5,15c1.6656,0,3.535-0.5596,5.0117-1.9395S14.998,9.4868,14.998,6.498c0.0648-1.3953-2.0628-1.3953-1.998,0c0,2.553-0.7997,4.1149-1.8535,5.0996C10.3731,12.3203,9.4288,12.7084,8.5,12.875V6.8418C9.9607,6.4058,10.9986,5.0642,11,3.5C11,1.567,9.5,0,7.5,0z M7.5,2C8.3284,2,9,2.6716,9,3.5S8.3284,5,7.5,5S6,4.3284,6,3.5S6.6716,2,7.5,2z"/>
+            </svg>
+            <span style="font-size:11px;">Porto</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    const WMS_URL = "https://solve.corila.it/geoserver/geonode/wms";
+    const WFS_URL = WMS_URL.replace(/\/wms\s*$/i, "/wfs");
+    let __currentCql = "";
+
+    const L_IMPIANTI    = "geonode:impianti";
+    const L_UP_EOLICO   = "geonode:up_eolico";
+    const L_PORTI       = "geonode:porti_unione";
+
+    // Map (Italia)
+    const map = L.map("map").setView([41.9, 12.6], 6);
+
+    // Basemap: SOLO Esri Satellite
+    const esriSat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, attribution: "Tiles &copy; Esri" }
+    ).addTo(map);
+
+    // Layer aree idonee — aggiunto PRIMA di impianti per stare sotto
+    const upEolico = L.tileLayer.wms(WMS_URL, {
+      layers: L_UP_EOLICO,
+      format: "image/png",
+      transparent: true,
+      version: "1.1.1",
+      opacity: 0.65
+    }).addTo(map);
+
+    // WMS overlay — usa buildWmsLayer così la funzione di filtro può riusarla
+    function buildWmsLayer(cqlFilter) {
+      const opts = {
+        layers: L_IMPIANTI,
+        format: "image/png",
+        transparent: true,
+        version: "1.1.1"
+      };
+      if (cqlFilter) opts.CQL_FILTER = cqlFilter;
+      return L.tileLayer.wms(WMS_URL, opts);
+    }
+    let impianti = buildWmsLayer(null).addTo(map);
+
+    // Layer porti — caricato via WFS/GeoJSON con marker SVG custom
+    const PORTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 15 15">
+      <path fill="#1a3a6b" d="M7.5,0C5.5,0,4,1.567,4,3.5c0.0024,1.5629,1.0397,2.902,2.5,3.3379v6.0391c-0.9305-0.1647-1.8755-0.5496-2.6484-1.2695C2.7992,10.6273,2.002,9.0676,2.002,6.498c0.0077-0.5646-0.4531-1.0236-1.0176-1.0137C0.4329,5.493-0.0076,5.9465,0,6.498c0,3.0029,1.0119,5.1955,2.4902,6.5723C3.9685,14.4471,5.8379,15,7.5,15c1.6656,0,3.535-0.5596,5.0117-1.9395S14.998,9.4868,14.998,6.498c0.0648-1.3953-2.0628-1.3953-1.998,0c0,2.553-0.7997,4.1149-1.8535,5.0996C10.3731,12.3203,9.4288,12.7084,8.5,12.875V6.8418C9.9607,6.4058,10.9986,5.0642,11,3.5C11,1.567,9.5,0,7.5,0z M7.5,2C8.3284,2,9,2.6716,9,3.5S8.3284,5,7.5,5S6,4.3284,6,3.5S6.6716,2,7.5,2z"/>
+    </svg>`;
+
+    const portoIcon = L.divIcon({
+      html: PORTO_SVG,
+      className: "",
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+      popupAnchor: [0, -12]
+    });
+
+    let portiUnione = L.geoJSON(null, {
+      pointToLayer: (feature, latlng) => L.marker(latlng, { icon: portoIcon })
+    });
+
+    async function loadPortiWFS() {
+      const url = `${WFS_URL}?service=WFS&version=1.1.0&request=GetFeature` +
+                  `&typeName=${encodeURIComponent(L_PORTI)}` +
+                  `&outputFormat=application/json` +
+                  `&srsName=EPSG:4326` +
+                  `&maxFeatures=5000`;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        portiUnione.addData(data);
+        if (document.getElementById("chk_porti").checked) {
+          portiUnione.addTo(map);
+        }
+        portiUnione.on("click", (e) => {
+          const props = (e.layer && e.layer.feature) ? e.layer.feature.properties : {};
+          const label = LAYER_LABELS[L_PORTI] || "Porto";
+          __wfState = { feats: [{ properties: props }], idx: 0, title: label, useCustomCard: false };
+          openPanel(buildGenericCardHTML(label, props, 0, 1));
+        });
+      } catch(err) {
+        console.warn("Impossibile caricare porti via WFS:", err);
+      }
+    }
+
+    loadPortiWFS();
+
+    // --- UI checkbox binding ---
+    const chk = (id) => document.getElementById(id);
+
+    function syncLayer(checkboxEl, layerObj) {
+      if (checkboxEl.checked) {
+        if (!map.hasLayer(layerObj)) map.addLayer(layerObj);
+      } else {
+        if (map.hasLayer(layerObj)) map.removeLayer(layerObj);
+      }
+    }
+    chk("chk_impianti").addEventListener("change", () => {
+      syncLayer(chk("chk_impianti"), impianti);
+      if (map.hasLayer(impianti)) applyFilters();
+    });
+    syncLayer(chk("chk_impianti"), impianti);
+
+    chk("chk_up_eolico").addEventListener("change", () => {
+      syncLayer(chk("chk_up_eolico"), upEolico);
+    });
+    syncLayer(chk("chk_up_eolico"), upEolico);
+
+    chk("chk_porti").addEventListener("change", () => {
+      if (chk("chk_porti").checked) {
+        if (!map.hasLayer(portiUnione)) map.addLayer(portiUnione);
+      } else {
+        if (map.hasLayer(portiUnione)) map.removeLayer(portiUnione);
+      }
+    });
+
+
+// ---------------------------
+// Filtro "proponente" e "stato_ist" (dropdown con valori univoci)
+// ---------------------------
+const selProponente = document.getElementById("filter_proponente");
+const selStatoIst   = document.getElementById("filter_stato_ist");
+const legendPotenza = document.getElementById("legendPotenza");
+
+function escapeCqlLiteral(v){
+  return String(v).replace(/'/g, "''");
+}
+
+function buildCqlFromFilters(){
+  const clauses = [];
+
+  const vProp = selProponente ? selProponente.value : "";
+  if (vProp) {
+    clauses.push(`proponente = '${escapeCqlLiteral(vProp)}'`);
+  }
+
+  const vStato = selStatoIst ? selStatoIst.value : "";
+  if (vStato) {
+    clauses.push(`stato_ist = '${escapeCqlLiteral(vStato)}'`);
+  }
+
+  return clauses.join(" AND ");
+}
+
+async function applyFilters(){
+  __currentCql = buildCqlFromFilters();
+
+  // Ricrea il layer WMS da zero con/senza CQL_FILTER
+  const wasVisible = map.hasLayer(impianti);
+  map.removeLayer(impianti);
+  impianti = buildWmsLayer(__currentCql);
+  if (wasVisible) map.addLayer(impianti);
+
+  // centra la mappa sulle geometrie filtrate (solo se esiste almeno un filtro attivo)
+  await zoomToCurrentFilter();
+}
+
+async function loadProponenteValues(){
+  if (!selProponente) return;
+
+  // Feedback visivo mentre carica
+  selProponente.disabled = true;
+  selProponente.innerHTML = `<option value="">Caricamento...</option>`;
+
+  const url = `${WFS_URL}?service=WFS&version=1.1.0&request=GetFeature` +
+              `&typeName=${encodeURIComponent(L_IMPIANTI)}` +
+              `&outputFormat=application/json` +
+              `&propertyName=proponente` +
+              `&maxFeatures=5000`;
+
+  try{
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    const vals = new Set();
+    (data.features || []).forEach(f => {
+      const p = (f && f.properties) ? f.properties.proponente : null;
+      const s = (p === null || p === undefined) ? "" : String(p).trim();
+      if (s) vals.add(s);
+    });
+
+    const arr = Array.from(vals).sort((a,b)=>a.localeCompare(b, "it", { sensitivity: "base" }));
+
+    if (arr.length === 0) {
+      selProponente.innerHTML = `<option value="">Nessun valore trovato</option>`;
+    } else {
+      selProponente.innerHTML = `<option value="">Tutti i proponenti (${arr.length})</option>` +
+        arr.map(v => `<option value="${String(v).replace(/"/g, "&quot;")}">${v}</option>`).join("");
+    }
+
+  } catch(e) {
+    console.warn("Impossibile popolare il filtro proponente via WFS:", e);
+    selProponente.innerHTML = `<option value="">Tutti i proponenti</option>`;
+    const noteEl = document.getElementById("filterNoteProponente");
+    if (noteEl) noteEl.innerHTML = `<span style="color:#c0392b">⚠ WFS non raggiungibile: ${e.message}</span>`;
+  } finally {
+    selProponente.disabled = false;
+  }
+}
+
+if (selProponente){
+  selProponente.addEventListener("change", applyFilters);
+  loadProponenteValues();
+}
+
+// Effettua una richiesta WFS con il CQL_FILTER corrente e centra la mappa
+// sull'estensione delle geometrie restituite. Viene eseguito solo se esiste
+// almeno un filtro attivo (proponente e/o stato_ist).
+async function zoomToCurrentFilter(){
+  if (!__currentCql || !__currentCql.trim()) {
+    // Nessun filtro attivo: non cambiamo lo zoom globale
+    return;
+  }
+
+  const url = `${WFS_URL}?service=WFS&version=1.1.0&request=GetFeature` +
+              `&typeName=${encodeURIComponent(L_IMPIANTI)}` +
+              `&outputFormat=application/json` +
+              `&srsName=EPSG:4326` +
+              `&maxFeatures=5000` +
+              `&CQL_FILTER=${encodeURIComponent(__currentCql)}`;
+
+  try{
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.features || !data.features.length) return;
+
+    const gj = L.geoJSON(data);
+    const bounds = gj.getBounds();
+    if (bounds.isValid()) {
+      // zoom leggermente meno spinto, con maxZoom e più padding
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
+    }
+  } catch(e){
+    console.warn("Impossibile calcolare i bounds per il filtro corrente:", e);
+  }
+}
+
+async function loadStatoIstValues(){
+  if (!selStatoIst) return;
+
+  selStatoIst.disabled = true;
+  selStatoIst.innerHTML = `<option value="">Caricamento...</option>`;
+
+  const url = `${WFS_URL}?service=WFS&version=1.1.0&request=GetFeature` +
+              `&typeName=${encodeURIComponent(L_IMPIANTI)}` +
+              `&outputFormat=application/json` +
+              `&propertyName=stato_ist` +
+              `&maxFeatures=5000`;
+
+  try{
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    const vals = new Set();
+    (data.features || []).forEach(f => {
+      const p = (f && f.properties) ? f.properties.stato_ist : null;
+      const s = (p === null || p === undefined) ? "" : String(p).trim();
+      if (s) vals.add(s);
+    });
+
+    const arr = Array.from(vals).sort((a,b)=>a.localeCompare(b, "it", { sensitivity: "base" }));
+
+    if (arr.length === 0) {
+      selStatoIst.innerHTML = `<option value="">Nessun valore trovato</option>`;
+    } else {
+      selStatoIst.innerHTML = `<option value="">Tutti gli stati procedurali (${arr.length})</option>` +
+        arr.map(v => `<option value="${String(v).replace(/"/g, "&quot;")}">${v}</option>`).join("");
+    }
+
+  } catch(e) {
+    console.warn("Impossibile popolare il filtro stato_ist via WFS:", e);
+    selStatoIst.innerHTML = `<option value="">Tutti gli stati procedurali</option>`;
+    const noteEl = document.getElementById("filterNoteStato");
+    if (noteEl) noteEl.innerHTML = `<span style="color:#c0392b">⚠ WFS non raggiungibile: ${e.message}</span>`;
+  } finally {
+    selStatoIst.disabled = false;
+  }
+}
+
+if (selStatoIst){
+  selStatoIst.addEventListener("change", applyFilters);
+  loadStatoIstValues();
+}
+
+// Calcolo e aggiornamento della scala colori per potenza_im
+async function loadPotenzaStats(){
+  if (!legendPotenza) return;
+
+  const itemsEl = legendPotenza.querySelector(".legend-scale-items");
+  if (itemsEl) {
+    itemsEl.innerHTML = `<div style="font-size: 11px; opacity: .75;">Calcolo intervalli in corso…</div>`;
+  }
+
+  const url = `${WFS_URL}?service=WFS&version=1.1.0&request=GetFeature` +
+              `&typeName=${encodeURIComponent(L_IMPIANTI)}` +
+              `&outputFormat=application/json` +
+              `&propertyName=potenza_im` +
+              `&maxFeatures=5000`;
+
+  try{
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    const vals = [];
+    (data.features || []).forEach(f => {
+      const p = (f && f.properties) ? f.properties.potenza_im : null;
+      const v = p === null || p === undefined ? NaN : Number(p);
+      if (!Number.isNaN(v)) vals.push(v);
+    });
+
+    if (!vals.length) {
+      if (itemsEl) {
+        itemsEl.innerHTML = `<div style="font-size: 11px; opacity: .75;">Nessun valore di potenza disponibile.</div>`;
+      }
+      return;
+    }
+
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+
+    // Numero di classi
+    const nClasses = 5;
+    let bounds = [];
+
+    if (min === max) {
+      const v = Math.round(min);
+      bounds = [v];
+    } else {
+      const step = (max - min) / nClasses;
+      for (let i = 0; i <= nClasses; i++) {
+        bounds.push(Math.round(min + step * i));
+      }
+      // Assicura che siano strettamente non decrescenti
+      for (let i = 1; i < bounds.length; i++) {
+        if (bounds[i] < bounds[i-1]) bounds[i] = bounds[i-1];
+      }
+    }
+
+    updatePotenzaLegend(bounds);
+
+  } catch(e) {
+    console.warn("Impossibile calcolare la scala potenza_im via WFS:", e);
+    if (itemsEl) {
+      itemsEl.innerHTML = `<div style="font-size: 11px; opacity: .75; color:#c0392b;">Errore nel calcolo degli intervalli di potenza.</div>`;
+    }
+  }
+}
+
+function updatePotenzaLegend(bounds){
+  if (!legendPotenza) return;
+  const itemsEl = legendPotenza.querySelector(".legend-scale-items");
+  if (!itemsEl) return;
+
+  const colors = [
+    "#e3f2fd",
+    "#bbdefb",
+    "#90caf9",
+    "#42a5f5",
+    "#0b1b3a"
+  ];
+
+  // Caso particolare: un solo valore
+  if (bounds.length === 1) {
+    itemsEl.innerHTML = `
+      <div class="legend-scale-item">
+        <span class="legend-scale-swatch" style="background:${colors[colors.length-1]}"></span>
+        <span>= ${bounds[0]} MW</span>
+      </div>
+    `;
+    return;
+  }
+
+  const nClasses = Math.min(colors.length, bounds.length - 1);
+  const items = [];
+
+  for (let i = 0; i < nClasses; i++) {
+    const from = bounds[i];
+    const to = bounds[i+1];
+    const color = colors[i];
+
+    let label;
+    if (i === nClasses - 1) {
+      label = `≥ ${from} MW`;
+    } else {
+      label = `${from} – ${to} MW`;
+    }
+
+    items.push(`
+      <div class="legend-scale-item">
+        <span class="legend-scale-swatch" style="background:${color}"></span>
+        <span>${label}</span>
+      </div>
+    `);
+  }
+
+  itemsEl.innerHTML = items.join("");
+}
+
+// avvia subito il calcolo della scala potenza
+loadPotenzaStats();
+
+
+    // ---------------------------
+    // Right side info panel helpers
+    // ---------------------------
+    const infoPanel = document.getElementById("infoPanel");
+    const panelContent = document.getElementById("panelContent");
+    const panelClose = document.getElementById("panelClose");
+    const panelBackdrop = document.getElementById("panelBackdrop");
+
+    function openPanel(html) {
+      panelContent.innerHTML = html;
+      infoPanel.classList.remove("panel--closed");
+      document.body.classList.add("panel-open");
+    }
+
+    function closePanel() {
+      infoPanel.classList.add("panel--closed");
+      document.body.classList.remove("panel-open");
+    }
+
+    panelClose.addEventListener("click", closePanel);
+    panelBackdrop.addEventListener("click", closePanel);
+// ---------------------------
+    // GetFeatureInfo (JSON + fallback HTML)
+    // ---------------------------
+    function buildGFIUrl(latlng, layerName, infoFormat) {
+    const point = map.latLngToContainerPoint(latlng, map.getZoom());
+    const size = map.getSize();
+  
+    // Query in EPSG:3857 (Leaflet default)
+    const bounds = map.getBounds();
+    const sw = map.options.crs.project(bounds.getSouthWest());
+    const ne = map.options.crs.project(bounds.getNorthEast());
+    const bbox = [sw.x, sw.y, ne.x, ne.y].join(",");
+  
+    const params = {
+      service: "WMS",
+      version: "1.1.1",
+      request: "GetFeatureInfo",
+      layers: layerName,
+      query_layers: layerName,
+      styles: "",
+      bbox: bbox,
+      feature_count: 20,
+      height: size.y,
+      width: size.x,
+      format: "image/png",
+      info_format: infoFormat,
+      srs: "EPSG:3857",
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+      // Rende più efficace il click sui layer areali/lineari in GeoServer
+      buffer: layerName === L_UP_EOLICO ? 10 : 5
+    };
+  
+    // Il CQL_FILTER della dashboard vale SOLO per geonode:impianti.
+    // Non va passato a geonode:up_eolico, perché contiene campi non presenti nel layer.
+    if (layerName === L_IMPIANTI && __currentCql && __currentCql.trim().length) {
+      params.CQL_FILTER = __currentCql;
+    }
+  
+    const query = Object.keys(params)
+      .filter(k => params[k] !== undefined && params[k] !== null)
+      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
+      .join("&");
+  
+    return `${WMS_URL}?${query}`;
+  }
+
+
+    function htmlGFIHasRealContent(html) {
+      if (!html) return false;
+      const s = String(html).trim();
+      if (!s) return false;
+
+      const low = s.toLowerCase();
+      if (low.includes("no features") || low.includes("search returned no results")) return false;
+      if (low.includes("serviceexception") || low.includes("exceptionreport")) return false;
+
+      // GeoServer spesso restituisce comunque una tabella HTML vuota anche quando
+      // il click non intercetta alcuna feature. Consideriamo valido il fallback
+      // HTML solo se contiene almeno una cella dati.
+      return /<td[\s>]/i.test(s);
+    }
+
+    async function fetchGFI(latlng, layerName) {
+      // 1) JSON: è il formato principale e permette di distinguere bene
+      // tra feature trovate e risposta vuota.
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "application/json"));
+        if (r.ok) {
+          const data = await r.json();
+          if (data && Array.isArray(data.features) && data.features.length > 0) {
+            return { type: "json", data };
+          }
+        }
+      } catch(e) {
+        console.warn("GetFeatureInfo JSON fallita per", layerName, e);
+      }
+
+      // 2) HTML fallback: usalo solo se contiene davvero attributi,
+      // non se GeoServer restituisce una tabella/caption vuota.
+      try {
+        const r = await fetch(buildGFIUrl(latlng, layerName, "text/html"));
+        if (r.ok) {
+          const html = await r.text();
+          if (htmlGFIHasRealContent(html)) {
+            return { type: "html", data: html };
+          }
+        }
+      } catch(e) {
+        console.warn("GetFeatureInfo HTML fallita per", layerName, e);
+      }
+
+      return null;
+    }
+
+
+    // ---------------------------
+    // Popup "TGS-like" card builder
+    // ---------------------------
+    function pick(props, keys) {
+      for (const k of keys) {
+        if (props && props[k] !== undefined && props[k] !== null && String(props[k]).trim() !== "") return { key: k, value: props[k] };
+      }
+      return null;
+    }
+
+    function humanizeKey(k) {
+  const labels = {
+    stato_ist: "Stato procedura",
+    regione: "Regione",
+    potenza_im: "Potenza installata (MW)",
+    proponente: "Proponente",
+    comune: "Comune",
+    tipologia: "Tipologia impianto",
+    area_marit: "Area marina",
+    descr_prog: "Descrizione",
+    data_avv: "Data avvio",
+    data_concl: "Data conclusione",
+    tipo_imp: "Tipologia impianto",
+    prog_sintetico: "Sintesi progetto",
+    vita_imp: "Durata impianto",
+    num_turb: "Numero turbine",
+    link: "Documenti uff",
+    comp: "Progetto",
+    provincia: "Provincia"
+  };
+
+  return labels[k] || k
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatValue(key, value) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return "—";
+  }
+
+  // Se il campo è "link", rendilo cliccabile
+  if (key === "link") {
+    const url = String(value).trim();
+
+    return `
+      <a href="${url}" 
+         target="_blank" 
+         rel="noopener noreferrer"
+         style="color:#0b1b3a;font-weight:700;text-decoration:underline;">
+         Apri documento
+      </a>
+    `;
+  }
+
+  return String(value);
+}
+    function buildCardHTML(title, props, idx, total) {
+      const namePick = pick(props, ["name","nome","progetto","project","impianto","windfarm","wf_name","id","codice","wtg","identificativo"]);
+      const cardTitle = namePick ? String(namePick.value) : title;
+
+      const statusPick = pick(props, ["stato_ist"]);
+      const countryPick = pick(props, ["regione"]);
+      const capPick = pick(props, ["potenza_im"]);
+
+      // Build key-value list (limit noisy fields)
+      const hiddenKeys = new Set(["bbox","geom","geometry","the_geom","wkb_geometry","ogc_fid","fid","id_","id","link2","link3"]);
+// ordine preferito dei campi (usa i NOMI REALI del layer)
+const fieldOrder = [
+  "comp",           // Progetto
+  "proponente",
+  "regione",
+  "provincia",
+  "comune",
+  "stato_ist",
+  "potenza_im",
+  "tecnologia",
+  "num_turb",       // Numero turbine (se così nel tuo gpkg)
+  "n_turbine",      // eventuale variante
+  "vita_imp",
+  "prog_sintetico",
+  "descr_prog",
+  "link"
+];
+
+// costruisci kv mostrando solo i campi presenti e non vuoti
+const kv = fieldOrder
+  .filter(k => props && props[k] !== undefined && props[k] !== null && String(props[k]).trim() !== "")
+  .map(k => ({ k, v: props[k] }));
+
+      const nav = (total > 1)
+        ? `<div class="wf-nav">
+             <span class="pill">${idx+1} / ${total}</span>
+             <button type="button" aria-label="precedente" onclick="__wfPrev()">&#x2190;</button>
+             <button type="button" aria-label="successivo" onclick="__wfNext()">&#x2192;</button>
+           </div>`
+        : "";
+
+      const svgIcon = `<svg class="wf-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2v8m0 0L6 7m6 3l6-3" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 10v12" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M12 14l-6 3m6-3l6 3" stroke="#0b1b3a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+
+      const metric = (label, value, icon) => {
+        const v = (value === null || value === undefined || String(value).trim() === "") ? "—" : String(value);
+        return `<div class="wf-metric">
+          <div class="k">${icon || ""}${label}</div>
+          <div class="v">${v}</div>
+        </div>`;
+      };
+
+      const iconDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#0b1b3a;opacity:.75"></span>`;
+      const iconGlobe = `<span style="display:inline-block;width:12px;height:12px;border-radius:999px;border:2px solid rgba(11,27,58,.75)"></span>`;
+      const iconBolt = `<span style="font-weight:900;opacity:.75">⚡</span>`;
+
+      return `
+        <div class="wf-card">
+          <div class="wf-header">
+            <h2 class="wf-title">${svgIcon}<span>${cardTitle}</span></h2>
+            <button class="wf-close" type="button" onclick="__wfClose()" aria-label="chiudi">×</button>
+          </div>
+
+          <div class="wf-metrics">
+            ${metric("Status", statusPick ? statusPick.value : "—", iconDot)}
+            ${metric("Region", countryPick ? countryPick.value : "—", iconGlobe)}
+            ${metric("Capacity (MW)", capPick ? capPick.value : "—", iconBolt)}
+          </div>
+
+          <div class="wf-body">
+            <div class="wf-section">
+              <div class="wf-h2">Dettagli</div>
+              <div class="wf-kv">
+                ${kv.length ? kv.map(r => `
+                  <div class="wf-row">
+  <div class="k">${humanizeKey(r.k)}</div>
+  <div class="v">
+    ${formatValue(r.k, r.v)}
+  </div>
+</div>
+                `).join("") : "<div class='wf-note'>(nessun attributo)</div>"}
+              </div>
+              ${nav}
+              <div class="wf-note">Se alcuni campi sono vuoti, dipende dagli attributi restituiti dal WMS GetFeatureInfo.</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    
+    // Simple multi-feature navigation inside the side panel
+    let __wfState = { feats: [], idx: 0, title: "Impianti" };
+
+    window.__wfClose = function() {
+      closePanel();
+    };
+
+    window.__wfPrev = function() {
+      if (!__wfState.feats.length) return;
+      __wfState.idx = (__wfState.idx - 1 + __wfState.feats.length) % __wfState.feats.length;
+      const props = (__wfState.feats[__wfState.idx] || {}).properties || {};
+      openPanel(__wfState.useCustomCard
+        ? buildCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length)
+        : buildGenericCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length));
+    };
+
+    window.__wfNext = function() {
+      if (!__wfState.feats.length) return;
+      __wfState.idx = (__wfState.idx + 1) % __wfState.feats.length;
+      const props = (__wfState.feats[__wfState.idx] || {}).properties || {};
+      openPanel(__wfState.useCustomCard
+        ? buildCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length)
+        : buildGenericCardHTML(__wfState.title, props, __wfState.idx, __wfState.feats.length));
+    };
+
+
+
+    // Mappa layer name → titolo human-readable
+    const LAYER_LABELS = {
+      [L_IMPIANTI]:  "Impianti",
+      [L_UP_EOLICO]: "Aree idonee",
+      [L_PORTI]:     "Porto"
+    };
+
+    // Costruisce card generica per layer senza fieldOrder specifico
+    function buildGenericCardHTML(title, props, idx, total) {
+      const hiddenKeys = new Set(["bbox","geom","geometry","the_geom","wkb_geometry","ogc_fid","fid","id_"]);
+      const kv = Object.entries(props || {})
+        .filter(([k, v]) => !hiddenKeys.has(k) && v !== null && v !== undefined && String(v).trim() !== "")
+        .map(([k, v]) => ({ k, v }));
+
+      const nav = (total > 1)
+        ? `<div class="wf-nav">
+             <span class="pill">${idx+1} / ${total}</span>
+             <button type="button" onclick="__wfPrev()">&#x2190;</button>
+             <button type="button" onclick="__wfNext()">&#x2192;</button>
+           </div>`
+        : "";
+
+      return `
+        <div class="wf-card">
+          <div class="wf-header">
+            <h2 class="wf-title"><span>${title}</span></h2>
+            <button class="wf-close" type="button" onclick="__wfClose()" aria-label="chiudi">×</button>
+          </div>
+          <div class="wf-body" style="border-top:1px solid rgba(0,0,0,.08);">
+            <div class="wf-section">
+              <div class="wf-h2">Dettagli</div>
+              <div class="wf-kv">
+                ${kv.length ? kv.map(r => `
+                  <div class="wf-row">
+                    <div class="k">${humanizeKey(r.k)}</div>
+                    <div class="v">${formatValue(r.k, r.v)}</div>
+                  </div>`).join("") : "<div class='wf-note'>(nessun attributo)</div>"}
+              </div>
+              ${nav}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    map.on("click", async (e) => {
+      // Lista ordinata dei layer attivi da interrogare
+      const activeLayers = [
+        { name: L_IMPIANTI,  layer: impianti,  useCustomCard: true  },
+        { name: L_UP_EOLICO, layer: upEolico,  useCustomCard: false }
+      ].filter(({ layer }) => map.hasLayer(layer));
+
+      if (!activeLayers.length) return;
+
+      let found = false;
+
+      for (const { name, layer, useCustomCard } of activeLayers) {
+        const res = await fetchGFI(e.latlng, name);
+        if (!res) continue;
+
+        found = true;
+        const label = LAYER_LABELS[name] || name;
+
+        if (res.type === "json") {
+          const feats = res.data.features || [];
+          if (!feats.length) continue;
+
+          __wfState = { feats, idx: 0, title: label, useCustomCard };
+
+          const props0 = (feats[0] || {}).properties || {};
+          openPanel(
+            useCustomCard
+              ? buildCardHTML(label, props0, 0, feats.length)
+              : buildGenericCardHTML(label, props0, 0, feats.length)
+          );
+        } else {
+          openPanel(
+            `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+               <div style="font-weight:800;font-size:16px;margin-bottom:6px;color:#0b1b3a;">${label}</div>
+               <div style="font-size:12px;max-height:70vh;overflow:auto;border:1px solid rgba(0,0,0,.12);border-radius:12px;padding:10px;background:#fff;">
+                 ${res.data}
+               </div>
+             </div>`
+          );
+        }
+        break; // mostra solo il primo layer con risultati
+      }
+
+      if (!found) {
+        openPanel(
+          `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+             <div style="font-weight:800;font-size:16px;margin-bottom:6px;color:#0b1b3a;">Nessun elemento interrogabile qui</div>
+             <div style="font-size:13px;opacity:.85;line-height:1.25;">
+               Verifica che i layer siano <b>Queryable</b> e che il browser non blocchi la richiesta (CORS).
+             </div>
+           </div>`
+        );
+      }
+    });
+  </script>
+</body>
+</html>
